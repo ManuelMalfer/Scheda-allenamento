@@ -4,15 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0f1115">
 <meta name="apple-mobile-web-app-title" content="Allenamento">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<title>Scheda Allenamento</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
-<title>Scheda Allenamento</title>
 <style>
   :root {
     --bg: #0f1115;
@@ -593,33 +597,177 @@
   .exercise-card.detail-mode .timer-display { font-size: 3rem; }
   .exercise-card.detail-mode .set-row { margin-bottom: 10px; }
   .exercise-card.detail-mode .set-input-group input { padding: 13px 8px; font-size: 1.1rem; }
+
+  /* ===== SCHERMATE: caricamento / accesso ===== */
+  .screen { display: none; }
+  .screen.show { display: block; }
+  #loadingScreen.show, #authScreen.show {
+    display: flex;
+    min-height: 100%;
+    align-items: center;
+    justify-content: center;
+    padding: calc(24px + env(safe-area-inset-top)) 20px calc(24px + env(safe-area-inset-bottom));
+  }
+  #appRoot.show { display: block; }
+  .loading-box { text-align: center; color: var(--text-dim); font-size: 0.9rem; max-width: 340px; line-height: 1.45; }
+  .spinner {
+    width: 34px; height: 34px; margin: 0 auto 14px;
+    border: 3px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+  .loading-error { color: var(--red); margin-top: 10px; }
+
+  .auth-box { width: 100%; max-width: 380px; }
+  .auth-logo { text-align: center; margin-bottom: 18px; }
+  .auth-logo img { width: 76px; height: 76px; border-radius: 18px; }
+  .auth-logo h2 { margin: 10px 0 2px; font-size: 1.35rem; }
+  .auth-logo p { margin: 0; color: var(--text-dim); font-size: 0.85rem; }
+  .auth-tabs { display: flex; gap: 6px; margin-bottom: 14px; background: var(--card); padding: 4px; border-radius: 12px; border: 1px solid var(--border); }
+  .auth-tab { flex: 1; text-align: center; padding: 10px; border-radius: 9px; font-weight: 700; font-size: 0.88rem; color: var(--text-dim); cursor: pointer; border: none; background: transparent; }
+  .auth-tab.active { background: var(--accent); color: #fff; }
+  .field { margin-bottom: 10px; }
+  .field label { display: block; font-size: 0.75rem; color: var(--text-dim); margin-bottom: 4px; }
+  .field input, .field select, .field textarea {
+    width: 100%; background: var(--card2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 10px; padding: 12px; font-size: 1rem; font-family: inherit;
+  }
+  .field textarea { min-height: 70px; resize: vertical; }
+  .field .hint { font-size: 0.7rem; color: var(--text-dim); margin-top: 4px; line-height: 1.35; }
+  .primary-btn, .secondary-btn, .google-btn {
+    display: block; width: 100%; padding: 13px; border-radius: 12px; border: none;
+    font-weight: 700; font-size: 0.92rem; cursor: pointer; margin-top: 10px; font-family: inherit;
+  }
+  .primary-btn { background: var(--accent); color: #fff; }
+  .primary-btn:disabled { opacity: 0.6; }
+  .secondary-btn { background: var(--card2); color: var(--text); border: 1px solid var(--border); }
+  .google-btn { background: #fff; color: #1f1f1f; display: flex; align-items: center; justify-content: center; gap: 10px; }
+  .google-btn svg { width: 18px; height: 18px; }
+  .link-btn { background: none; border: none; color: var(--accent2); font-size: 0.8rem; margin-top: 10px; cursor: pointer; padding: 4px; font-family: inherit; }
+  .auth-divider { display: flex; align-items: center; gap: 10px; color: var(--text-dim); font-size: 0.75rem; margin: 16px 0 6px; }
+  .auth-divider::before, .auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+  .auth-msg { font-size: 0.8rem; padding: 10px 12px; border-radius: 10px; margin-bottom: 10px; display: none; line-height: 1.4; }
+  .auth-msg.show { display: block; }
+  .auth-msg.err { background: rgba(255,85,85,0.12); color: #ff9a9a; }
+  .auth-msg.ok { background: rgba(76,175,80,0.14); color: #8fd893; }
+  .auth-center { text-align: center; }
+
+  /* ===== stato vuoto ===== */
+  .empty-state { text-align: center; padding: 30px 10px; }
+  .empty-emoji { font-size: 2.6rem; }
+  .empty-state h2 { font-size: 1.15rem; margin: 10px 0 6px; }
+  .empty-state p { color: var(--text-dim); font-size: 0.85rem; line-height: 1.45; margin: 0 auto 8px; max-width: 340px; }
+  .empty-state .primary-btn, .empty-state .secondary-btn { max-width: 340px; margin-left: auto; margin-right: auto; }
+
+  /* barra in basso con 3 pulsanti */
+  .bottom-btn.edit { background: var(--accent); color: #fff; }
+
+  /* ===== EDITOR SCHEDA ===== */
+  .editor-overlay {
+    display: none; position: fixed; inset: 0; z-index: 24; background: var(--bg); overflow-y: auto;
+    padding: calc(12px + env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom));
+  }
+  .editor-overlay.open { display: block; }
+  .editor-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+  .editor-top h2 { margin: 0; font-size: 1.15rem; }
+  .editor-done { padding: 10px 18px; border-radius: 10px; border: none; background: var(--green); color: #fff; font-weight: 700; font-size: 0.88rem; cursor: pointer; }
+  .ed-day { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px; margin-bottom: 14px; }
+  .ed-day-head { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; }
+  .ed-day-name { flex: 1; min-width: 0; background: var(--card2); border: 1px solid var(--border); color: var(--text); border-radius: 9px; padding: 10px; font-size: 1rem; font-weight: 700; font-family: inherit; }
+  .icon-btn { flex-shrink: 0; width: 36px; height: 36px; border-radius: 9px; border: 1px solid var(--border); background: var(--card2); color: var(--text); font-size: 0.9rem; cursor: pointer; }
+  .icon-btn:disabled { opacity: 0.3; }
+  .icon-btn.del { color: #ff8080; }
+  .ed-ex { display: flex; gap: 6px; align-items: center; padding: 8px 0; border-top: 1px solid var(--border); }
+  .ed-ex-info { flex: 1; min-width: 0; cursor: pointer; }
+  .ed-ex-info b { display: block; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ed-ex-info span { display: block; font-size: 0.72rem; color: var(--text-dim); margin-top: 2px; }
+  .ed-empty { font-size: 0.8rem; color: var(--text-dim); padding: 8px 0; font-style: italic; border-top: 1px solid var(--border); }
+  .ed-add { width: 100%; margin-top: 8px; padding: 10px; border-radius: 9px; border: 1px dashed var(--border); background: transparent; color: var(--accent2); font-weight: 600; font-size: 0.82rem; cursor: pointer; }
+  .ed-settings { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px; margin-top: 18px; }
+  .ed-settings h3 { margin: 0 0 4px; font-size: 0.95rem; }
+  .ed-settings p { margin: 0 0 10px; font-size: 0.75rem; color: var(--text-dim); line-height: 1.4; }
+  .ed-row { display: flex; gap: 10px; }
+  .ed-row .field { flex: 1; }
+  .modal-box.ex-form h3 { margin-bottom: 12px; }
+  .rest-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .account-line { font-size: 0.85rem; margin: 4px 0 2px; word-break: break-all; }
 </style>
 </head>
 <body>
+<!-- CARICAMENTO -->
+<div class="screen show" id="loadingScreen">
+  <div class="loading-box">
+    <div class="spinner"></div>
+    <div id="loadingText">Caricamento…</div>
+    <div class="loading-error" id="loadingError"></div>
+  </div>
+</div>
 
+<!-- ACCESSO -->
+<div class="screen" id="authScreen">
+  <div class="auth-box">
+    <div class="auth-logo">
+      <img src="apple-touch-icon.png" alt="">
+      <h2>Scheda Allenamento</h2>
+      <p>La tua scheda, i tuoi carichi, su ogni dispositivo</p>
+    </div>
+    <div class="auth-tabs">
+      <button type="button" class="auth-tab active" id="tabLogin">Accedi</button>
+      <button type="button" class="auth-tab" id="tabSignup">Registrati</button>
+    </div>
+    <div class="auth-msg" id="authMsg"></div>
+    <div class="field">
+      <label for="authEmail">Email</label>
+      <input type="email" id="authEmail" autocomplete="email" inputmode="email" autocapitalize="off" placeholder="nome@esempio.it">
+    </div>
+    <div class="field">
+      <label for="authPassword">Password</label>
+      <input type="password" id="authPassword" autocomplete="current-password" placeholder="Almeno 6 caratteri">
+    </div>
+    <div class="field" id="confirmField" style="display:none">
+      <label for="authPassword2">Ripeti password</label>
+      <input type="password" id="authPassword2" autocomplete="new-password">
+    </div>
+    <button type="button" class="primary-btn" id="authSubmit">Accedi</button>
+    <div class="auth-center"><button type="button" class="link-btn" id="forgotBtn">Password dimenticata?</button></div>
+    <div class="auth-divider">oppure</div>
+    <button type="button" class="google-btn" id="googleBtn">
+      <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+      Continua con Google
+    </button>
+  </div>
+</div>
+
+<!-- APP -->
+<div class="screen" id="appRoot">
 <header>
   <h1>&#128170; Scheda Allenamento</h1>
   <div class="day-tabs" id="dayTabs"></div>
 </header>
 
-<div class="session-row">
-  <span class="session-label">Sessione:</span>
-  <select id="sessionSelect"></select>
-</div>
-<div class="info-banner" id="infoBanner"></div>
-<div class="progress-pill" id="progressPill">
-  <span id="progressText">0/0</span>
-  <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+<div id="sessionControls">
+  <div class="session-row">
+    <span class="session-label">Sessione:</span>
+    <select id="sessionSelect"></select>
+  </div>
+  <div class="info-banner" id="infoBanner"></div>
+  <div class="progress-pill" id="progressPill">
+    <span id="progressText">0/0</span>
+    <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+  </div>
 </div>
 
 <main id="exerciseList"></main>
 
-<div class="toast" id="toast">Salvato</div>
-
 <footer class="bottom-bar">
-  <button class="bottom-btn export" onclick="openExportModal()">&#128228; Esporta per il PT</button>
-  <button class="bottom-btn settings" onclick="openSettingsModal()">&#9881;&#65039; Impostazioni</button>
+  <button class="bottom-btn export" id="openExportBtn">&#128228; Esporta</button>
+  <button class="bottom-btn edit" id="openEditorBtn">&#9999;&#65039; Scheda</button>
+  <button class="bottom-btn settings" id="openSettingsBtn">&#9881;&#65039;</button>
 </footer>
+</div>
+
+<div class="toast" id="toast">Salvato</div>
 
 <!-- MODALE ESPORTAZIONE -->
 <div class="modal-overlay" id="exportModal">
@@ -631,14 +779,14 @@
     </div>
     <button class="modal-btn summary" id="summaryBtn">&#128203; Vedi riepilogo (per screenshot)</button>
     <textarea id="exportText" readonly></textarea>
-    <button class="modal-btn pdf" id="pdfBtn">&#128196; Genera PDF (apre in una nuova scheda)</button>
+    <button class="modal-btn pdf" id="pdfBtn">&#128196; Genera PDF</button>
     <div id="pdfFallbackLink"></div>
-    <p class="modal-hint">Il modo piu&#39; affidabile e&#39; "Vedi riepilogo": si apre una schermata pulita di cui fare uno screenshot. Il PDF dipende dal browser che usi &mdash; se non si apre, usa il riepilogo qui sopra.</p>
-    <button class="modal-btn close" onclick="document.getElementById('exportModal').classList.remove('open')">Chiudi</button>
+    <p class="modal-hint">Il modo più affidabile è "Vedi riepilogo": si apre una schermata pulita di cui fare uno screenshot da mandare al PT.</p>
+    <button class="modal-btn close" data-close="exportModal">Chiudi</button>
   </div>
 </div>
 
-<!-- VISTA RIEPILOGO A SCHERMO INTERO, PENSATA PER LO SCREENSHOT -->
+<!-- VISTA RIEPILOGO PER SCREENSHOT -->
 <div class="summary-view-overlay" id="summaryView">
   <div class="summary-topbar">
     <button class="summary-close-btn" id="summaryCloseBtn">&#10005; Chiudi</button>
@@ -646,27 +794,32 @@
   <div id="summaryContent"></div>
 </div>
 
-<!-- MODALE IMPOSTAZIONI / BACKUP -->
+<!-- MODALE IMPOSTAZIONI -->
 <div class="modal-overlay" id="settingsModal">
   <div class="modal-box">
     <h3>Impostazioni</h3>
 
-    <h4>Backup dati</h4>
-    <p class="modal-hint">Tutti i tuoi dati sono salvati solo su questo telefono, in questo browser. Scarica un backup ogni tanto per non rischiare di perderli (es. se cambi telefono o svuoti la cache).</p>
-    <button class="modal-btn backup-dl" id="backupDownloadBtn">&#128190; Scarica backup completo (.json)</button>
-    <button class="modal-btn backup-restore" id="backupRestoreBtn">&#128228; Ripristina da backup</button>
+    <h4>Account</h4>
+    <p class="account-line" id="accountEmail"></p>
+    <p class="modal-hint">La scheda e lo storico sono salvati nel tuo account: accedendo da un altro telefono o dal computer ritrovi tutto. Senza connessione l'app funziona lo stesso e sincronizza appena torna la rete.</p>
+    <button class="modal-btn backup-restore" id="logoutBtn">Esci dall'account</button>
+
+    <h4>Backup</h4>
+    <p class="modal-hint">Copia di sicurezza in un file, oppure importa un backup (anche della versione precedente dell'app).</p>
+    <button class="modal-btn backup-dl" id="backupDownloadBtn">&#128190; Scarica backup (.json)</button>
+    <button class="modal-btn backup-restore" id="backupRestoreBtn">&#128228; Importa backup</button>
     <input type="file" id="backupFileInput" class="hidden-file" accept="application/json,.json">
     <div class="backup-status" id="backupStatus"></div>
 
-    <h4>Dati salvati</h4>
+    <h4>Storico</h4>
     <p class="modal-hint" id="dataSummary"></p>
-    <button class="modal-btn danger" id="resetBtn">&#128465;&#65039; Cancella tutti i dati</button>
+    <button class="modal-btn danger" id="resetBtn">&#128465;&#65039; Cancella tutto lo storico</button>
 
-    <button class="modal-btn close" onclick="document.getElementById('settingsModal').classList.remove('open')">Chiudi</button>
+    <button class="modal-btn close" data-close="settingsModal">Chiudi</button>
   </div>
 </div>
 
-<!-- VISTA DETTAGLIO ESERCIZIO A SCHERMO INTERO -->
+<!-- VISTA DETTAGLIO ESERCIZIO -->
 <div class="detail-view-overlay" id="exerciseDetailView">
   <div class="detail-header">
     <button class="detail-back-btn" id="detailBackBtn">&larr; Torna alla lista</button>
@@ -674,125 +827,516 @@
   <div id="detailContent"></div>
 </div>
 
+<!-- EDITOR SCHEDA -->
+<div class="editor-overlay" id="editorView">
+  <div class="editor-top">
+    <h2>Modifica scheda</h2>
+    <button class="editor-done" id="editorDoneBtn">Fatto</button>
+  </div>
+  <div id="editorContent"></div>
+</div>
+
+<!-- MODALE ESERCIZIO -->
+<div class="modal-overlay" id="exModal">
+  <div class="modal-box ex-form">
+    <h3 id="exModalTitle">Nuovo esercizio</h3>
+    <div class="field">
+      <label for="exfNome">Nome esercizio</label>
+      <input type="text" id="exfNome" placeholder="es. Panca piana bilanciere">
+    </div>
+    <div class="ed-row">
+      <div class="field">
+        <label for="exfSets">Serie</label>
+        <input type="number" id="exfSets" min="0" max="12" inputmode="numeric">
+      </div>
+      <div class="field">
+        <label for="exfRest">Recupero (sec)</label>
+        <input type="number" id="exfRest" min="0" max="900" step="5" inputmode="numeric">
+      </div>
+    </div>
+    <div class="rest-chips" id="restChips"></div>
+    <div class="field" style="margin-top:10px">
+      <label for="exfReps">Ripetizioni</label>
+      <input type="text" id="exfReps" placeholder="es. 8-12">
+      <div class="hint">Un valore per tutte le serie (es. 8-12, 30 secondi) oppure uno per serie separati da virgola (es. 8, 8, 6, 6). Con 0 serie l'esercizio ha solo un campo note (es. cardio).</div>
+    </div>
+    <div class="field">
+      <label for="exfTecnica">Tecnica (facoltativa)</label>
+      <input type="text" id="exfTecnica" list="tecnicheList" placeholder="es. Jump Set">
+      <datalist id="tecnicheList">
+        <option value="Ramping"><option value="Jump Set"><option value="Super Set"><option value="Drop Set"><option value="Rest Pause"><option value="Piramidale"><option value="Circuito">
+      </datalist>
+    </div>
+    <div class="field">
+      <label for="exfNote">Note</label>
+      <textarea id="exfNote" placeholder="es. 1 secondo di fermo in massima contrazione"></textarea>
+    </div>
+    <div class="field">
+      <label for="exfLink">Link video (facoltativo)</label>
+      <input type="url" id="exfLink" placeholder="https://youtube.com/..." autocapitalize="off">
+    </div>
+    <div class="auth-msg err" id="exfError"></div>
+    <button class="modal-btn summary" id="exfSave">Salva esercizio</button>
+    <button class="modal-btn backup-restore" data-close="exModal">Annulla</button>
+  </div>
+</div>
+
 <script>
-const WORKOUT_DATA = {"Giorno 1": [{"nome": "Spinte Panca Piana Bilanciere", "sets": "2 + 2", "reps": "8 poi 6", "rest": "2'", "rest_seconds": 120, "tecnica": "", "note": "Quando diminuiscono le ripetizioni aumenti il carico", "link": "https://www.youtube.com/watch?v=ZaNyRjpoki8&list=PLp_4s0SnOuvMJbEwieVTabpwmnNRiuE0X&index=29", "num_sets": 4, "set_targets": ["8", "8", "6", "6"]}, {"nome": "Spinte Panca 30° Manubri", "sets": "3", "reps": "6-10", "rest": "1'30''", "rest_seconds": 90, "tecnica": "", "note": "Mantieni 1 secondo fermo al petto", "link": "https://www.youtube.com/watch?v=ZaNyRjpoki8&list=PLp_4s0SnOuvMJbEwieVTabpwmnNRiuE0X&index=29", "num_sets": 3, "set_targets": ["6-10", "6-10", "6-10"]}, {"nome": "Croci ai Cavi", "sets": "3", "reps": "8-12", "rest": "1'30''", "rest_seconds": 90, "tecnica": "", "note": "Mantieni 1 secondo fermo nel punto di massima contrazione", "link": "https://youtube.com/shorts/LCdjVd-LIaE?si=cUVZnZ7qi_pSShD4", "num_sets": 3, "set_targets": ["8-12", "8-12", "8-12"]}, {"nome": "Pulley Triangolo", "sets": "3", "reps": "6-10", "rest": "1'30''", "rest_seconds": 90, "tecnica": "", "note": "Mantieni 1 secondo fermo nel punto di massima contrazione", "link": "https://www.youtube.com/watch?v=7lc8Ow4vIwA&list=PLp_4s0SnOuvNChkzzxnHeCTN4jKDsFE__&index=45", "num_sets": 3, "set_targets": ["6-10", "6-10", "6-10"]}, {"nome": "T-Bar Machine High Pull", "sets": "3", "reps": "8-12", "rest": "1'30''", "rest_seconds": 90, "tecnica": "", "note": "Mantieni i gomiti altezza spalla e fermati quando sei in linea con il busto", "link": "https://youtube.com/shorts/BUY8mNVYZ8Y?si=RZpK4bmWIlFmtGUr", "num_sets": 3, "set_targets": ["8-12", "8-12", "8-12"]}, {"nome": "Hammer Curl Manubri", "sets": "3", "reps": "10", "rest": "30''", "rest_seconds": 30, "tecnica": "Jump Set", "note": "Esegui gli esercizi in jump set: primo recupero 30 secondi, poi secondo esercizio, poi recupero 1'30\"", "link": "https://www.youtube.com/watch?v=0rRpv6o140o&list=PLp_4s0SnOuvPaGU1QufBYYYmj6Qou_MP3&index=21", "num_sets": 3, "set_targets": ["10", "10", "10"]}, {"nome": "Push Down Corda", "sets": "3", "reps": "8-12", "rest": "1'30''", "rest_seconds": 90, "tecnica": "Jump Set", "note": "Esegui gli esercizi in jump set: primo recupero 30 secondi, poi secondo esercizio, poi recupero 1'30\"", "link": "https://www.youtube.com/watch?v=-QGC1cL6ETE&list=PLp_4s0SnOuvO8m4mkOQsA7XkttLKvjEYg&index=25", "num_sets": 3, "set_targets": ["8-12", "8-12", "8-12"]}, {"nome": "Step Up/Down", "sets": "3", "reps": "30 secondi", "rest": "", "rest_seconds": 90, "tecnica": "Super Set", "note": "Esegui gli esercizi in circuito uno dietro l'altro e poi recuperi", "link": "https://youtube.com/shorts/R8W8DA4jqvI?si=bm_ik7b5AZQSj2Xr", "num_sets": 3, "set_targets": ["30s", "30s", "30s"]}, {"nome": "Russian Twist", "sets": "3", "reps": "15", "rest": "1'", "rest_seconds": 60, "tecnica": "Super Set", "note": "Esegui gli esercizi in circuito uno dietro l'altro e poi recuperi", "link": "https://youtube.com/shorts/uIGn2y3yBGI?si=MLpjEgAea2kDirRc", "num_sets": 3, "set_targets": ["15", "15", "15"]}], "Giorno 2": [{"nome": "Squat Machine", "sets": "2 + 2", "reps": "10 poi 8", "rest": "2'", "rest_seconds": 120, "tecnica": "", "note": "Quando diminuiscono le ripetizioni aumenti il carico", "link": "https://youtube.com/shorts/At8G8KIDEas?si=c68Sn4lJOZuHWioc", "num_sets": 4, "set_targets": ["10", "10", "8", "8"]}, {"nome": "Leg Press", "sets": "3", "reps": "10", "rest": "1'30''", "rest_seconds": 90, "tecnica": "Ramping", "note": "Utilizza un carico crescente, per arrivare all'ultima serie con un carico bello pesante", "link": "https://www.youtube.com/watch?v=jeAN2C3Mqdw&list=PLp_4s0SnOuvP5YcXnRGYKAVXSXOJu1XcE&index=6", "num_sets": 3, "set_targets": ["10", "10", "10"]}, {"nome": "Leg Extension", "sets": "3", "reps": "8-12", "rest": "1'30''", "rest_seconds": 90, "tecnica": "", "note": "Mantieni 1 secondo di fermo nel punto di massima contrazione", "link": "https://www.youtube.com/watch?v=PzIfB9MiiX8&list=PLp_4s0SnOuvP5YcXnRGYKAVXSXOJu1XcE&index=5", "num_sets": 3, "set_targets": ["8-12", "8-12", "8-12"]}, {"nome": "Leg Curl Sdraiato", "sets": "3", "reps": "8-12", "rest": "1'30''", "rest_seconds": 90, "tecnica": "", "note": "Mantieni 1 secondo di fermo nel punto di massima contrazione", "link": "https://www.youtube.com/watch?v=IXg1PQ_5gmw&list=PLp_4s0SnOuvOzI2rkpTDvzky3Y7QEooWg&index=12", "num_sets": 3, "set_targets": ["8-12", "8-12", "8-12"]}, {"nome": "Spinte Panca 70° al Multipower", "sets": "3", "reps": "8", "rest": "2'", "rest_seconds": 120, "tecnica": "Ramping", "note": "Utilizza un carico crescente, per arrivare all'ultima serie con un carico bello pesante", "link": "https://www.youtube.com/watch?v=hejuwn4kffM&list=PLp_4s0SnOuvOTzLW4aJBJpMOHMFMMO7kU&index=11", "num_sets": 3, "set_targets": ["8", "8", "8"]}, {"nome": "Alzate Laterali", "sets": "3", "reps": "12", "rest": "30''", "rest_seconds": 30, "tecnica": "Jump Set", "note": "Jump set con l'esercizio successivo, poi recupero 1'30\". Mantieni 1 secondo di fermo in massima contrazione", "link": "https://www.youtube.com/watch?v=ot9nwSC1JnA&list=PLp_4s0SnOuvOTzLW4aJBJpMOHMFMMO7kU&index=24", "num_sets": 3, "set_targets": ["12", "12", "12"]}, {"nome": "Alzate Frontali Bilanciere", "sets": "3", "reps": "10", "rest": "1'30''", "rest_seconds": 90, "tecnica": "Jump Set", "note": "Jump set con l'esercizio precedente, poi recupero 1'30\". Mantieni 1 secondo di fermo in massima contrazione", "link": "https://youtube.com/shorts/wFiG_ZWe5_I?si=SnCQCF52OQm2B24Z", "num_sets": 3, "set_targets": ["10", "10", "10"]}, {"nome": "Scala", "sets": "", "reps": "8 minuti", "rest": "", "rest_seconds": 90, "tecnica": "", "note": "Velocità costante a livello 4", "link": "https://youtube.com/shorts/6mYp_BNYD5Y?si=Q6SldEKnsgmNzluq", "num_sets": 0, "set_targets": []}], "Giorno 3": [{"nome": "Row Machine", "sets": "3", "reps": "10", "rest": "1'30''", "rest_seconds": 90, "tecnica": "Ramping", "note": "Utilizza un carico crescente, per arrivare all'ultima serie con un carico bello pesante", "link": "", "num_sets": 3, "set_targets": ["10", "10", "10"]}, {"nome": "Lat Machine Triangolo", "sets": "3", "reps": "8-12", "rest": "1'30''", "rest_seconds": 90, "tecnica": "", "note": "Mantieni 1 secondo fermo nel punto di massima contrazione", "link": "https://www.youtube.com/watch?v=_2MfZAj98tk&list=PLp_4s0SnOuvNChkzzxnHeCTN4jKDsFE__&index=17", "num_sets": 3, "set_targets": ["8-12", "8-12", "8-12"]}, {"nome": "Rematore Manubrio", "sets": "2 + 2", "reps": "10 per lato poi 8 per lato", "rest": "1'", "rest_seconds": 60, "tecnica": "", "note": "Quando diminuiscono le ripetizioni aumenti il carico", "link": "https://www.youtube.com/watch?v=L2FuijYFTvE&list=PLp_4s0SnOuvNChkzzxnHeCTN4jKDsFE__&index=48", "num_sets": 4, "set_targets": ["10 per lato", "10 per lato", "8 per lato", "8 per lato"]}, {"nome": "Chest Press", "sets": "3", "reps": "8", "rest": "1'30''", "rest_seconds": 90, "tecnica": "Ramping", "note": "Utilizza un carico crescente, per arrivare all'ultima serie con un carico bello pesante", "link": "https://www.youtube.com/watch?v=SaYGLH-fU7k&list=PLp_4s0SnOuvMJbEwieVTabpwmnNRiuE0X&index=14", "num_sets": 3, "set_targets": ["8", "8", "8"]}, {"nome": "Spinte Panca 45° Bilanciere", "sets": "3", "reps": "10", "rest": "1'30''", "rest_seconds": 90, "tecnica": "", "note": "Mantieni 1 secondo fermo nel punto di massima contrazione", "link": "https://youtube.com/shorts/wuTYygcPfio?si=Odc4W_8NgCsr3bI-", "num_sets": 3, "set_targets": ["10", "10", "10"]}, {"nome": "French Press KB", "sets": "3", "reps": "6-10", "rest": "30''", "rest_seconds": 30, "tecnica": "Jump Set", "note": "Jump set con l'esercizio successivo, poi recupero 1'30\"", "link": "https://www.youtube.com/watch?v=XMkUtMtcOh0&list=PLp_4s0SnOuvO8m4mkOQsA7XkttLKvjEYg&index=10", "num_sets": 3, "set_targets": ["6-10", "6-10", "6-10"]}, {"nome": "Curl Bilanciere EZ", "sets": "3", "reps": "12", "rest": "1'30''", "rest_seconds": 90, "tecnica": "Jump Set", "note": "Jump set con l'esercizio precedente, poi recupero 1'30\"", "link": "https://www.youtube.com/watch?v=dc330H9yN3Y&list=PLp_4s0SnOuvPaGU1QufBYYYmj6Qou_MP3&index=8", "num_sets": 3, "set_targets": ["12", "12", "12"]}, {"nome": "Jumping Jack", "sets": "3", "reps": "30 secondi", "rest": "", "rest_seconds": 90, "tecnica": "Super Set", "note": "Esegui gli esercizi in circuito uno dietro l'altro e poi recuperi", "link": "https://youtube.com/shorts/yg3KQQn3QWg?si=0_k0m87acjjE9cER", "num_sets": 3, "set_targets": ["30s", "30s", "30s"]}, {"nome": "Sit Up", "sets": "3", "reps": "15", "rest": "", "rest_seconds": 90, "tecnica": "Super Set", "note": "Esegui gli esercizi in circuito uno dietro l'altro e poi recuperi", "link": "https://www.youtube.com/watch?v=VPqrJ9XsLJM&list=PLp_4s0SnOuvMbcP4DO9VFkkIX31x5c05d&index=31", "num_sets": 3, "set_targets": ["15", "15", "15"]}]};
+// ================== CONFIGURAZIONE FIREBASE ==================
+const firebaseConfig = {
+  apiKey: "AIzaSyBDuadKTHD6cOnOVzP8B9M2S8B886NGqyg",
+  authDomain: "scheda-allenamento-e66b8.firebaseapp.com",
+  projectId: "scheda-allenamento-e66b8",
+  storageBucket: "scheda-allenamento-e66b8.firebasestorage.app",
+  messagingSenderId: "359954082902",
+  appId: "1:359954082902:web:b1cd54d23798a2b9f7dff7"
+};
 
-const STORAGE_KEY = "scheda_allenamento_v3";
-const OLD_STORAGE_KEYS = ["scheda_allenamento_v2", "elia_allenamento_settembre_2026_v1"];
-const SESSIONS = Array.from({length: 12}, (_, i) => "Sessione " + (i+1));
-const DELOAD_SESSION_INDEX = 11; // Sessione 12 (indice 0-based)
+// Scheda di esempio (quella originale), caricabile da ogni nuovo utente
+const EXAMPLE_DATA = {"Giorno 1": [{"nome": "Spinte Panca Piana Bilanciere", "sets": "2 + 2", "reps": "8 poi 6", "rest": "2'", "rest_seconds": 120, "tecnica": "", "note": "Quando diminuiscono le ripetizioni aumenti il carico", "link": "https://www.youtube.com/watch?v=ZaNyRjpoki8&list=PLp_4s0SnOuvMJbEwieVTabpwmnNRiuE0X&index=29", "num_sets": 4, "set_targets": ["8", "8", "6", "6"]}, {"nome": "Spinte Panca 30° Manubri", "sets": "3", "reps": "6-10", "rest": "1'30''", "rest_seconds": 90, "tecnica": "", "note": "Mantieni 1 secondo fermo al petto", "link": "https://www.youtube.com/watch?v=ZaNyRjpoki8&list=PLp_4s0SnOuvMJbEwieVTabpwmnNRiuE0X&index=29", "num_sets": 3, "set_targets": ["6-10", "6-10", "6-10"]}, {"nome": "Croci ai Cavi", "sets": "3", "reps": "8-12", "rest": "1'30''", "rest_seconds": 90, "tecnica": "", "note": "Mantieni 1 secondo fermo nel punto di massima contrazione", "link": "https://youtube.com/shorts/LCdjVd-LIaE?si=cUVZnZ7qi_pSShD4", "num_sets": 3, "set_targets": ["8-12", "8-12", "8-12"]}, {"nome": "Pulley Triangolo", "sets": "3", "reps": "6-10", "rest": "1'30''", "rest_seconds": 90, "tecnica": "", "note": "Mantieni 1 secondo fermo nel punto di massima contrazione", "link": "https://www.youtube.com/watch?v=7lc8Ow4vIwA&list=PLp_4s0SnOuvNChkzzxnHeCTN4jKDsFE__&index=45", "num_sets": 3, "set_targets": ["6-10", "6-10", "6-10"]}, {"nome": "T-Bar Machine High Pull", "sets": "3", "reps": "8-12", "rest": "1'30''", "rest_seconds": 90, "tecnica": "", "note": "Mantieni i gomiti altezza spalla e fermati quando sei in linea con il busto", "link": "https://youtube.com/shorts/BUY8mNVYZ8Y?si=RZpK4bmWIlFmtGUr", "num_sets": 3, "set_targets": ["8-12", "8-12", "8-12"]}, {"nome": "Hammer Curl Manubri", "sets": "3", "reps": "10", "rest": "30''", "rest_seconds": 30, "tecnica": "Jump Set", "note": "Esegui gli esercizi in jump set: primo recupero 30 secondi, poi secondo esercizio, poi recupero 1'30\"", "link": "https://www.youtube.com/watch?v=0rRpv6o140o&list=PLp_4s0SnOuvPaGU1QufBYYYmj6Qou_MP3&index=21", "num_sets": 3, "set_targets": ["10", "10", "10"]}, {"nome": "Push Down Corda", "sets": "3", "reps": "8-12", "rest": "1'30''", "rest_seconds": 90, "tecnica": "Jump Set", "note": "Esegui gli esercizi in jump set: primo recupero 30 secondi, poi secondo esercizio, poi recupero 1'30\"", "link": "https://www.youtube.com/watch?v=-QGC1cL6ETE&list=PLp_4s0SnOuvO8m4mkOQsA7XkttLKvjEYg&index=25", "num_sets": 3, "set_targets": ["8-12", "8-12", "8-12"]}, {"nome": "Step Up/Down", "sets": "3", "reps": "30 secondi", "rest": "", "rest_seconds": 90, "tecnica": "Super Set", "note": "Esegui gli esercizi in circuito uno dietro l'altro e poi recuperi", "link": "https://youtube.com/shorts/R8W8DA4jqvI?si=bm_ik7b5AZQSj2Xr", "num_sets": 3, "set_targets": ["30s", "30s", "30s"]}, {"nome": "Russian Twist", "sets": "3", "reps": "15", "rest": "1'", "rest_seconds": 60, "tecnica": "Super Set", "note": "Esegui gli esercizi in circuito uno dietro l'altro e poi recuperi", "link": "https://youtube.com/shorts/uIGn2y3yBGI?si=MLpjEgAea2kDirRc", "num_sets": 3, "set_targets": ["15", "15", "15"]}], "Giorno 2": [{"nome": "Squat Machine", "sets": "2 + 2", "reps": "10 poi 8", "rest": "2'", "rest_seconds": 120, "tecnica": "", "note": "Quando diminuiscono le ripetizioni aumenti il carico", "link": "https://youtube.com/shorts/At8G8KIDEas?si=c68Sn4lJOZuHWioc", "num_sets": 4, "set_targets": ["10", "10", "8", "8"]}, {"nome": "Leg Press", "sets": "3", "reps": "10", "rest": "1'30''", "rest_seconds": 90, "tecnica": "Ramping", "note": "Utilizza un carico crescente, per arrivare all'ultima serie con un carico bello pesante", "link": "https://www.youtube.com/watch?v=jeAN2C3Mqdw&list=PLp_4s0SnOuvP5YcXnRGYKAVXSXOJu1XcE&index=6", "num_sets": 3, "set_targets": ["10", "10", "10"]}, {"nome": "Leg Extension", "sets": "3", "reps": "8-12", "rest": "1'30''", "rest_seconds": 90, "tecnica": "", "note": "Mantieni 1 secondo di fermo nel punto di massima contrazione", "link": "https://www.youtube.com/watch?v=PzIfB9MiiX8&list=PLp_4s0SnOuvP5YcXnRGYKAVXSXOJu1XcE&index=5", "num_sets": 3, "set_targets": ["8-12", "8-12", "8-12"]}, {"nome": "Leg Curl Sdraiato", "sets": "3", "reps": "8-12", "rest": "1'30''", "rest_seconds": 90, "tecnica": "", "note": "Mantieni 1 secondo di fermo nel punto di massima contrazione", "link": "https://www.youtube.com/watch?v=IXg1PQ_5gmw&list=PLp_4s0SnOuvOzI2rkpTDvzky3Y7QEooWg&index=12", "num_sets": 3, "set_targets": ["8-12", "8-12", "8-12"]}, {"nome": "Spinte Panca 70° al Multipower", "sets": "3", "reps": "8", "rest": "2'", "rest_seconds": 120, "tecnica": "Ramping", "note": "Utilizza un carico crescente, per arrivare all'ultima serie con un carico bello pesante", "link": "https://www.youtube.com/watch?v=hejuwn4kffM&list=PLp_4s0SnOuvOTzLW4aJBJpMOHMFMMO7kU&index=11", "num_sets": 3, "set_targets": ["8", "8", "8"]}, {"nome": "Alzate Laterali", "sets": "3", "reps": "12", "rest": "30''", "rest_seconds": 30, "tecnica": "Jump Set", "note": "Jump set con l'esercizio successivo, poi recupero 1'30\". Mantieni 1 secondo di fermo in massima contrazione", "link": "https://www.youtube.com/watch?v=ot9nwSC1JnA&list=PLp_4s0SnOuvOTzLW4aJBJpMOHMFMMO7kU&index=24", "num_sets": 3, "set_targets": ["12", "12", "12"]}, {"nome": "Alzate Frontali Bilanciere", "sets": "3", "reps": "10", "rest": "1'30''", "rest_seconds": 90, "tecnica": "Jump Set", "note": "Jump set con l'esercizio precedente, poi recupero 1'30\". Mantieni 1 secondo di fermo in massima contrazione", "link": "https://youtube.com/shorts/wFiG_ZWe5_I?si=SnCQCF52OQm2B24Z", "num_sets": 3, "set_targets": ["10", "10", "10"]}, {"nome": "Scala", "sets": "", "reps": "8 minuti", "rest": "", "rest_seconds": 90, "tecnica": "", "note": "Velocità costante a livello 4", "link": "https://youtube.com/shorts/6mYp_BNYD5Y?si=Q6SldEKnsgmNzluq", "num_sets": 0, "set_targets": []}], "Giorno 3": [{"nome": "Row Machine", "sets": "3", "reps": "10", "rest": "1'30''", "rest_seconds": 90, "tecnica": "Ramping", "note": "Utilizza un carico crescente, per arrivare all'ultima serie con un carico bello pesante", "link": "", "num_sets": 3, "set_targets": ["10", "10", "10"]}, {"nome": "Lat Machine Triangolo", "sets": "3", "reps": "8-12", "rest": "1'30''", "rest_seconds": 90, "tecnica": "", "note": "Mantieni 1 secondo fermo nel punto di massima contrazione", "link": "https://www.youtube.com/watch?v=_2MfZAj98tk&list=PLp_4s0SnOuvNChkzzxnHeCTN4jKDsFE__&index=17", "num_sets": 3, "set_targets": ["8-12", "8-12", "8-12"]}, {"nome": "Rematore Manubrio", "sets": "2 + 2", "reps": "10 per lato poi 8 per lato", "rest": "1'", "rest_seconds": 60, "tecnica": "", "note": "Quando diminuiscono le ripetizioni aumenti il carico", "link": "https://www.youtube.com/watch?v=L2FuijYFTvE&list=PLp_4s0SnOuvNChkzzxnHeCTN4jKDsFE__&index=48", "num_sets": 4, "set_targets": ["10 per lato", "10 per lato", "8 per lato", "8 per lato"]}, {"nome": "Chest Press", "sets": "3", "reps": "8", "rest": "1'30''", "rest_seconds": 90, "tecnica": "Ramping", "note": "Utilizza un carico crescente, per arrivare all'ultima serie con un carico bello pesante", "link": "https://www.youtube.com/watch?v=SaYGLH-fU7k&list=PLp_4s0SnOuvMJbEwieVTabpwmnNRiuE0X&index=14", "num_sets": 3, "set_targets": ["8", "8", "8"]}, {"nome": "Spinte Panca 45° Bilanciere", "sets": "3", "reps": "10", "rest": "1'30''", "rest_seconds": 90, "tecnica": "", "note": "Mantieni 1 secondo fermo nel punto di massima contrazione", "link": "https://youtube.com/shorts/wuTYygcPfio?si=Odc4W_8NgCsr3bI-", "num_sets": 3, "set_targets": ["10", "10", "10"]}, {"nome": "French Press KB", "sets": "3", "reps": "6-10", "rest": "30''", "rest_seconds": 30, "tecnica": "Jump Set", "note": "Jump set con l'esercizio successivo, poi recupero 1'30\"", "link": "https://www.youtube.com/watch?v=XMkUtMtcOh0&list=PLp_4s0SnOuvO8m4mkOQsA7XkttLKvjEYg&index=10", "num_sets": 3, "set_targets": ["6-10", "6-10", "6-10"]}, {"nome": "Curl Bilanciere EZ", "sets": "3", "reps": "12", "rest": "1'30''", "rest_seconds": 90, "tecnica": "Jump Set", "note": "Jump set con l'esercizio precedente, poi recupero 1'30\"", "link": "https://www.youtube.com/watch?v=dc330H9yN3Y&list=PLp_4s0SnOuvPaGU1QufBYYYmj6Qou_MP3&index=8", "num_sets": 3, "set_targets": ["12", "12", "12"]}, {"nome": "Jumping Jack", "sets": "3", "reps": "30 secondi", "rest": "", "rest_seconds": 90, "tecnica": "Super Set", "note": "Esegui gli esercizi in circuito uno dietro l'altro e poi recuperi", "link": "https://youtube.com/shorts/yg3KQQn3QWg?si=0_k0m87acjjE9cER", "num_sets": 3, "set_targets": ["30s", "30s", "30s"]}, {"nome": "Sit Up", "sets": "3", "reps": "15", "rest": "", "rest_seconds": 90, "tecnica": "Super Set", "note": "Esegui gli esercizi in circuito uno dietro l'altro e poi recuperi", "link": "https://www.youtube.com/watch?v=VPqrJ9XsLJM&list=PLp_4s0SnOuvMbcP4DO9VFkkIX31x5c05d&index=31", "num_sets": 3, "set_targets": ["15", "15", "15"]}]};
 
-let state = loadState();
-let currentDay = Object.keys(WORKOUT_DATA)[0];
-let currentSession = SESSIONS[0];
+// Chiavi dei dati salvati dalle versioni precedenti (solo su questo telefono)
+const LEGACY_KEYS = ["scheda_allenamento_v3", "scheda_allenamento_v2", "elia_allenamento_settembre_2026_v1"];
+const DEFAULT_SESSIONS = 12;
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+auth.languageCode = 'it';
+const db = firebase.firestore();
+// cache locale: l'app funziona anche offline e sincronizza quando torna la rete
+db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+
+// ================== STATO ==================
+let currentUser = null;
+let workout = null;        // { days: [{id, name, exercises: [...]}], sessions, deloadSession }
+let logs = {};             // id -> { dayId, exId, session, sets | note, timestamp }
+let unsubs = [];
+let currentDayId = null;
+let currentSession = 0;    // indice 0-based
 let currentExportMode = 'day';
-
-// timers[tKey] = { total, remainingWhenPaused, endAt, running, intervalId }
+let pendingRender = false;
 let timers = {};
 let wakeLockRef = null;
 
-// ---------- STORAGE ----------
-function loadState() {
-  let s = {};
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    s = raw ? JSON.parse(raw) : {};
-  } catch (e) { s = {}; }
+const $ = (id) => document.getElementById(id);
 
-  // migrazione automatica dai dati di versioni precedenti (peso/reps unico -> array di serie)
-  // si scorrono dalla piu' vecchia alla piu' recente, cosi' la piu' recente vince in caso di conflitto
-  try {
-    let migrated = false;
-    for (let ki = OLD_STORAGE_KEYS.length - 1; ki >= 0; ki--) {
-      const oldRaw = localStorage.getItem(OLD_STORAGE_KEYS[ki]);
-      if (!oldRaw) continue;
-      const old = JSON.parse(oldRaw);
-      Object.keys(old).forEach(k => {
-        if (s[k]) return; // non sovrascrivere dati gia' presenti nel nuovo formato
-        const entry = old[k];
-        const parts = k.split("||");
-        const exName = parts[1];
-        const ex = findExerciseByName(exName);
-        if (ex && ex.num_sets > 0) {
-          s[k] = { sets: [{ peso: entry.peso || '', reps: entry.repsFatte || '' }], timestamp: entry.timestamp };
-        } else {
-          s[k] = { note: entry.repsFatte || entry.peso || '', timestamp: entry.timestamp };
-        }
-        migrated = true;
-      });
-    }
-    if (migrated) localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
-  } catch (e) { /* migrazione best-effort, non bloccante */ }
+// ================== UTILITA' ==================
+function newId(prefix) {
+  return prefix + Date.now().toString(36).slice(-5) + Math.random().toString(36).slice(2, 7);
+}
+function userPath(p) { return 'users/' + currentUser.uid + '/' + p; }
+function workoutRef() { return db.doc(userPath('data/workout')); }
+function logsCol() { return db.collection(userPath('logs')); }
+function logId(dayId, exId, s) { return dayId + '__' + exId + '__' + s; }
+function sessionLabel(i) { return 'Sessione ' + (i + 1); }
+function numSessions() { return workout && workout.sessions ? workout.sessions : DEFAULT_SESSIONS; }
+function deloadIndex() { return workout && workout.deloadSession ? workout.deloadSession - 1 : -1; }
+function getDay(id) { return workout ? workout.days.find(d => d.id === id) : null; }
 
-  return s;
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function escapeAttr(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
+function safeId(s) { return String(s).replace(/[^a-zA-Z0-9]/g, '_'); }
+
+function splitReps(ex) {
+  return String(ex.reps || '').split(',').map(x => x.trim()).filter(Boolean);
+}
+function targetsFor(ex) {
+  const n = ex.num_sets || 0;
+  if (!n) return [];
+  const raw = String(ex.reps || '').trim();
+  if (raw.includes(',')) {
+    const parts = splitReps(ex);
+    return Array.from({ length: n }, (_, i) => parts[Math.min(i, parts.length - 1)] || '');
+  }
+  return Array(n).fill(raw);
+}
+function repsLabel(ex) {
+  const raw = String(ex.reps || '').trim();
+  if (!raw.includes(',')) return raw;
+  const groups = [];
+  splitReps(ex).forEach(p => {
+    const g = groups[groups.length - 1];
+    if (g && g.v === p) g.n++; else groups.push({ v: p, n: 1 });
+  });
+  return groups.map(g => g.n > 1 ? g.n + '×' + g.v : g.v).join(' poi ');
+}
+function fmtRest(sec) {
+  sec = parseInt(sec, 10) || 0;
+  if (!sec) return '';
+  const m = Math.floor(sec / 60), r = sec % 60;
+  return (m ? m + "'" : '') + (r ? r + "''" : '');
 }
 
-function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+function normalizeWorkout(data) {
+  const w = {
+    sessions: parseInt(data && data.sessions, 10) || DEFAULT_SESSIONS,
+    deloadSession: data && data.deloadSession != null ? (parseInt(data.deloadSession, 10) || 0) : DEFAULT_SESSIONS,
+    days: []
+  };
+  ((data && data.days) || []).forEach(d => {
+    w.days.push({
+      id: d.id || newId('d'),
+      name: d.name || 'Giorno',
+      exercises: (d.exercises || []).map(e => ({
+        id: e.id || newId('e'),
+        nome: e.nome || '',
+        num_sets: Math.max(0, parseInt(e.num_sets, 10) || 0),
+        reps: e.reps || '',
+        rest_seconds: parseInt(e.rest_seconds, 10) || 0,
+        tecnica: e.tecnica || '',
+        note: e.note || '',
+        link: e.link || ''
+      }))
+    });
+  });
+  if (w.deloadSession > w.sessions) w.deloadSession = 0;
+  return w;
 }
 
-function findExerciseByName(name) {
-  for (const day of Object.keys(WORKOUT_DATA)) {
-    const found = WORKOUT_DATA[day].find(e => e.nome === name);
-    if (found) return found;
+function buildExampleWorkout() {
+  return normalizeWorkout({
+    sessions: 12,
+    deloadSession: 12,
+    days: Object.keys(EXAMPLE_DATA).map(dayName => ({
+      id: newId('d'),
+      name: dayName,
+      exercises: EXAMPLE_DATA[dayName].map(ex => ({
+        id: newId('e'),
+        nome: ex.nome,
+        num_sets: ex.num_sets,
+        reps: ex.num_sets > 0 && new Set(ex.set_targets).size > 1 ? ex.set_targets.join(', ') : ex.reps,
+        rest_seconds: ex.rest_seconds || 90,
+        tecnica: ex.tecnica || '',
+        note: ex.note || '',
+        link: ex.link || ''
+      }))
+    }))
+  });
+}
+
+function ensureCurrentDay() {
+  if (!workout) return;
+  if (!getDay(currentDayId)) currentDayId = workout.days.length ? workout.days[0].id : null;
+  if (currentSession >= numSessions()) currentSession = numSessions() - 1;
+  if (currentSession < 0) currentSession = 0;
+}
+
+// ================== SALVATAGGIO ==================
+function persistWorkout() {
+  if (!currentUser || !workout) return;
+  const clean = JSON.parse(JSON.stringify(workout));
+  clean.updatedAt = firebase.firestore.FieldValue.serverTimestamp();
+  workoutRef().set(clean).catch(err => {
+    console.error(err);
+    showToast('Errore nel salvataggio della scheda');
+  });
+}
+
+function saveLog(dayId, exId, s, entry) {
+  const id = logId(dayId, exId, s);
+  const data = Object.assign({ dayId, exId, session: s }, entry);
+  logs[id] = data;
+  logsCol().doc(id).set(data).catch(err => {
+    console.error(err);
+    showToast('Errore nel salvataggio');
+  });
+}
+
+function commitLogWrites(writes) {
+  for (let i = 0; i < writes.length; i += 400) {
+    const batch = db.batch();
+    writes.slice(i, i + 400).forEach(w => {
+      batch.set(logsCol().doc(w.id), w.data);
+      logs[w.id] = w.data;
+    });
+    batch.commit().catch(err => console.error(err));
+  }
+}
+
+function deleteLogs(filterFn) {
+  const ids = Object.keys(logs).filter(id => filterFn(logs[id]));
+  for (let i = 0; i < ids.length; i += 400) {
+    const batch = db.batch();
+    ids.slice(i, i + 400).forEach(id => { batch.delete(logsCol().doc(id)); delete logs[id]; });
+    batch.commit().catch(err => console.error(err));
+  }
+  return ids.length;
+}
+
+// ================== DATI DELLA VERSIONE PRECEDENTE ==================
+function readLegacyLocal() {
+  for (const k of LEGACY_KEYS) {
+    try {
+      const raw = localStorage.getItem(k);
+      if (!raw) continue;
+      const o = JSON.parse(raw);
+      if (o && typeof o === 'object' && Object.keys(o).length) return o;
+    } catch (e) { /* ignora */ }
   }
   return null;
 }
+function legacyImportedFlag() { return 'scheda_legacy_imported_' + (currentUser ? currentUser.uid : ''); }
 
-function keyFor(day, exName, session) {
-  return day + "||" + exName + "||" + session;
-}
-
-function timerKeyFor(day, exName) {
-  return day + "||" + exName;
-}
-
-function getAllHistoryForExercise(day, exName) {
-  const results = [];
-  SESSIONS.forEach((s, idx) => {
-    const k = keyFor(day, exName, s);
-    if (state[k]) results.push({ session: s, index: idx, ...state[k] });
+// legacy: { "Giorno 1||Nome esercizio||Sessione 3": {sets:[...]} | {note} | {peso, repsFatte} }
+function importLegacyEntries(legacy) {
+  const writes = [];
+  let skipped = 0;
+  Object.keys(legacy).forEach(k => {
+    const parts = k.split('||');
+    const day = workout.days.find(d => d.name === parts[0]);
+    const ex = day && day.exercises.find(e => e.nome === parts[1]);
+    const m = /(\d+)/.exec(parts[2] || '');
+    if (!day || !ex || !m) { skipped++; return; }
+    const s = parseInt(m[1], 10) - 1;
+    const e = legacy[k] || {};
+    let entry = null;
+    if (Array.isArray(e.sets)) entry = { sets: e.sets.map(x => ({ peso: String(x.peso || ''), reps: String(x.reps || '') })) };
+    else if (e.note) entry = { note: String(e.note) };
+    else if (e.peso || e.repsFatte) {
+      entry = ex.num_sets > 0
+        ? { sets: [{ peso: String(e.peso || ''), reps: String(e.repsFatte || '') }] }
+        : { note: String(e.repsFatte || e.peso || '') };
+    }
+    if (!entry) { skipped++; return; }
+    writes.push({
+      id: logId(day.id, ex.id, s),
+      data: Object.assign({ dayId: day.id, exId: ex.id, session: s, timestamp: e.timestamp || new Date().toISOString() }, entry)
+    });
   });
-  return results;
+  commitLogWrites(writes);
+  return { imported: writes.length, skipped };
 }
 
-function getLastEntry(day, exName, beforeSessionIndex) {
-  const hist = getAllHistoryForExercise(day, exName).filter(h => h.index < beforeSessionIndex);
-  if (hist.length === 0) return null;
-  hist.sort((a, b) => b.index - a.index);
-  return hist[0];
+// ================== SCHERMATE ==================
+function showScreen(name) {
+  ['loadingScreen', 'authScreen', 'appRoot'].forEach(id => $(id).classList.remove('show'));
+  $({ loading: 'loadingScreen', auth: 'authScreen', app: 'appRoot' }[name]).classList.add('show');
+  window.scrollTo(0, 0);
 }
 
-// ---------- RENDER: TABS / SESSIONE / BANNER / PROGRESSO ----------
+function stopAllTimers() {
+  Object.values(timers).forEach(t => { if (t.intervalId) clearInterval(t.intervalId); });
+  timers = {};
+  if (wakeLockRef) { wakeLockRef.release().catch(() => {}); wakeLockRef = null; }
+}
+
+function closeAllOverlays() {
+  ['exportModal', 'settingsModal', 'exModal'].forEach(id => $(id).classList.remove('open'));
+  ['summaryView', 'exerciseDetailView', 'editorView'].forEach(id => $(id).classList.remove('open'));
+}
+
+// ================== AUTENTICAZIONE ==================
+auth.onAuthStateChanged(user => {
+  unsubs.forEach(f => f());
+  unsubs = [];
+  stopAllTimers();
+  closeAllOverlays();
+  currentUser = user;
+  workout = null;
+  logs = {};
+  currentDayId = null;
+  currentSession = 0;
+
+  if (!user) { showScreen('auth'); return; }
+
+  $('loadingText').textContent = 'Carico la tua scheda…';
+  $('loadingError').textContent = '';
+  showScreen('loading');
+
+  unsubs.push(workoutRef().onSnapshot(snap => {
+    workout = snap.exists ? normalizeWorkout(snap.data()) : normalizeWorkout({ days: [] });
+    onDataChanged(snap.metadata.hasPendingWrites);
+  }, onDataError));
+
+  unsubs.push(logsCol().onSnapshot(qs => {
+    const next = {};
+    qs.forEach(d => { next[d.id] = d.data(); });
+    logs = next;
+    onDataChanged(qs.metadata.hasPendingWrites);
+  }, onDataError));
+});
+
+function onDataError(err) {
+  console.error(err);
+  showScreen('loading');
+  $('loadingText').textContent = 'Non riesco a leggere i tuoi dati.';
+  $('loadingError').textContent = err && err.code === 'permission-denied'
+    ? 'Accesso negato dal database: controlla che le regole di Firestore siano state pubblicate.'
+    : 'Errore: ' + (err && err.message ? err.message : err);
+}
+
+function onDataChanged(fromLocalWrite) {
+  if (!workout) return;
+  ensureCurrentDay();
+  if (!$('appRoot').classList.contains('show')) {
+    showScreen('app');
+    renderDayTabs();
+    renderAll();
+    return;
+  }
+  if (fromLocalWrite) return; // abbiamo gia' ridisegnato noi dopo il salvataggio
+  scheduleRender();
+}
+
+// Non ridisegna mentre stai scrivendo o sei in una vista a schermo intero:
+// l'aggiornamento verra' applicato al prossimo ridisegno.
+function scheduleRender() {
+  const a = document.activeElement;
+  const typing = a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT');
+  const overlayOpen = ['exerciseDetailView', 'editorView', 'summaryView'].some(id => $(id).classList.contains('open'));
+  if (typing || overlayOpen) { pendingRender = true; return; }
+  renderDayTabs();
+  renderAll();
+}
+
+let authMode = 'login';
+function setAuthMode(mode) {
+  authMode = mode;
+  $('tabLogin').classList.toggle('active', mode === 'login');
+  $('tabSignup').classList.toggle('active', mode === 'signup');
+  $('confirmField').style.display = mode === 'signup' ? 'block' : 'none';
+  $('authSubmit').textContent = mode === 'signup' ? 'Crea account' : 'Accedi';
+  $('authPassword').setAttribute('autocomplete', mode === 'signup' ? 'new-password' : 'current-password');
+  $('forgotBtn').style.display = mode === 'signup' ? 'none' : 'inline-block';
+  showAuthMsg('');
+}
+function showAuthMsg(text, kind) {
+  const el = $('authMsg');
+  el.textContent = text || '';
+  el.className = 'auth-msg' + (text ? ' show ' + (kind || 'err') : '');
+}
+function authErrorText(e) {
+  const code = e && e.code ? e.code : '';
+  const map = {
+    'auth/invalid-email': "L'indirizzo email non è valido.",
+    'auth/missing-email': 'Scrivi la tua email.',
+    'auth/missing-password': 'Scrivi la password.',
+    'auth/user-not-found': 'Email o password non corretti.',
+    'auth/wrong-password': 'Email o password non corretti.',
+    'auth/invalid-credential': 'Email o password non corretti.',
+    'auth/invalid-login-credentials': 'Email o password non corretti.',
+    'auth/email-already-in-use': 'Esiste già un account con questa email: usa "Accedi".',
+    'auth/weak-password': 'La password deve avere almeno 6 caratteri.',
+    'auth/too-many-requests': 'Troppi tentativi. Riprova tra qualche minuto.',
+    'auth/network-request-failed': 'Nessuna connessione. Per accedere serve internet.',
+    'auth/popup-blocked': 'Il browser ha bloccato la finestra di Google. Riprova, oppure accedi con email e password.',
+    'auth/unauthorized-domain': 'Questo indirizzo non è autorizzato in Firebase (Authentication → Impostazioni → Domini autorizzati).',
+    'auth/operation-not-allowed': 'Questo metodo di accesso non è abilitato in Firebase.',
+    'local/mismatch': 'Le due password non coincidono.'
+  };
+  return map[code] || ('Accesso non riuscito' + (code ? ' (' + code + ')' : '') + '.');
+}
+
+async function submitAuth() {
+  const email = $('authEmail').value.trim();
+  const pw = $('authPassword').value;
+  const btn = $('authSubmit');
+  showAuthMsg('');
+  btn.disabled = true;
+  try {
+    if (authMode === 'signup') {
+      if (pw !== $('authPassword2').value) throw { code: 'local/mismatch' };
+      await auth.createUserWithEmailAndPassword(email, pw);
+    } else {
+      await auth.signInWithEmailAndPassword(email, pw);
+    }
+  } catch (e) {
+    showAuthMsg(authErrorText(e));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function resetPassword() {
+  const email = $('authEmail').value.trim();
+  if (!email) { showAuthMsg('Scrivi la tua email qui sopra, poi tocca di nuovo "Password dimenticata?".'); return; }
+  try {
+    await auth.sendPasswordResetEmail(email);
+    showAuthMsg('Ti ho inviato un\u2019email per reimpostare la password. Controlla anche lo spam.', 'ok');
+  } catch (e) {
+    showAuthMsg(authErrorText(e));
+  }
+}
+
+async function googleLogin() {
+  showAuthMsg('');
+  const provider = new firebase.auth.GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  try {
+    await auth.signInWithPopup(provider);
+  } catch (e) {
+    if (e && (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request')) return;
+    const standalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+    if (standalone && e && e.code !== 'auth/unauthorized-domain') {
+      showAuthMsg("Dall'app installata sulla schermata Home l'accesso con Google a volte non riesce su iPhone. Usa email e password, oppure riprova.");
+    } else {
+      showAuthMsg(authErrorText(e));
+    }
+  }
+}
+
+$('tabLogin').onclick = () => setAuthMode('login');
+$('tabSignup').onclick = () => setAuthMode('signup');
+$('authSubmit').onclick = submitAuth;
+$('forgotBtn').onclick = resetPassword;
+$('googleBtn').onclick = googleLogin;
+['authEmail', 'authPassword', 'authPassword2'].forEach(id => {
+  $(id).addEventListener('keydown', e => { if (e.key === 'Enter') submitAuth(); });
+});
+$('logoutBtn').onclick = () => {
+  if (confirm("Vuoi uscire dall'account?")) auth.signOut();
+};
+
+// ================== STORICO ==================
+function getAllHistoryForExercise(dayId, exId) {
+  return Object.values(logs)
+    .filter(l => l.dayId === dayId && l.exId === exId && l.session < numSessions())
+    .map(l => Object.assign({}, l, { index: l.session, session: sessionLabel(l.session) }))
+    .sort((a, b) => a.index - b.index);
+}
+function getLastEntry(dayId, exId, beforeSessionIndex) {
+  const hist = getAllHistoryForExercise(dayId, exId).filter(h => h.index < beforeSessionIndex);
+  return hist.length ? hist[hist.length - 1] : null;
+}
+function hasData(entry) {
+  if (!entry) return false;
+  if (entry.note) return true;
+  if (entry.sets && entry.sets.some(s => s.peso || s.reps)) return true;
+  return false;
+}
+
+// ================== RENDER PRINCIPALE ==================
 function renderDayTabs() {
-  const container = document.getElementById('dayTabs');
+  const container = $('dayTabs');
   container.innerHTML = '';
-  Object.keys(WORKOUT_DATA).forEach(day => {
+  if (!workout) return;
+  workout.days.forEach(day => {
     const el = document.createElement('div');
-    el.className = 'day-tab' + (day === currentDay ? ' active' : '');
-    el.textContent = day;
-    el.onclick = () => { currentDay = day; renderDayTabs(); renderAll(); };
+    el.className = 'day-tab' + (day.id === currentDayId ? ' active' : '');
+    el.textContent = day.name;
+    el.onclick = () => { currentDayId = day.id; renderDayTabs(); renderAll(); };
     container.appendChild(el);
   });
 }
 
 function renderSessionSelect() {
-  const sel = document.getElementById('sessionSelect');
+  const sel = $('sessionSelect');
   sel.innerHTML = '';
-  SESSIONS.forEach(s => {
+  for (let i = 0; i < numSessions(); i++) {
     const opt = document.createElement('option');
-    opt.value = s;
-    opt.textContent = s + (SESSIONS.indexOf(s) === DELOAD_SESSION_INDEX ? ' (scarico)' : '');
-    if (s === currentSession) opt.selected = true;
+    opt.value = i;
+    opt.textContent = sessionLabel(i) + (i === deloadIndex() ? ' (scarico)' : '');
+    if (i === currentSession) opt.selected = true;
     sel.appendChild(opt);
-  });
-  sel.onchange = () => { currentSession = sel.value; renderAll(); };
+  }
+  sel.onchange = () => { currentSession = parseInt(sel.value, 10); renderAll(); };
 }
 
 function renderInfoBanner() {
-  const el = document.getElementById('infoBanner');
-  const idx = SESSIONS.indexOf(currentSession);
-  if (idx === DELOAD_SESSION_INDEX) {
+  const el = $('infoBanner');
+  if (currentSession === deloadIndex()) {
     el.className = 'info-banner deload';
     el.innerHTML = '&#128994; <b>Sessione di scarico</b> &mdash; riduci i carichi rispetto alle sessioni precedenti';
   } else {
@@ -802,44 +1346,95 @@ function renderInfoBanner() {
 }
 
 function renderProgress() {
-  const exercises = WORKOUT_DATA[currentDay];
+  const day = getDay(currentDayId);
+  const exercises = day ? day.exercises : [];
   let done = 0;
-  exercises.forEach(ex => {
-    const k = keyFor(currentDay, ex.nome, currentSession);
-    if (hasData(state[k])) done++;
-  });
+  exercises.forEach(ex => { if (hasData(logs[logId(day.id, ex.id, currentSession)])) done++; });
   const total = exercises.length;
-  const pct = total ? Math.round((done / total) * 100) : 0;
-  document.getElementById('progressText').textContent = done + '/' + total + ' esercizi';
-  document.getElementById('progressFill').style.width = pct + '%';
+  $('progressText').textContent = done + '/' + total + ' esercizi';
+  $('progressFill').style.width = (total ? Math.round(done / total * 100) : 0) + '%';
 }
-
-function hasData(entry) {
-  if (!entry) return false;
-  if (entry.note) return true;
-  if (entry.sets && entry.sets.some(s => s.peso || s.reps)) return true;
-  return false;
-}
-
-// ---------- RENDER: ESERCIZI ----------
-function safeId(s) { return s.replace(/[^a-zA-Z0-9]/g, '_'); }
 
 function renderAll() {
-  renderSessionSelect();
-  renderInfoBanner();
-  renderProgress();
+  pendingRender = false;
+  if (!workout) return;
+  ensureCurrentDay();
+  const day = getDay(currentDayId);
+  $('sessionControls').style.display = day && day.exercises.length ? 'block' : 'none';
+  if (day && day.exercises.length) {
+    renderSessionSelect();
+    renderInfoBanner();
+    renderProgress();
+  }
   renderExercises();
+}
+
+function renderEmptyState(list) {
+  const legacy = readLegacyLocal();
+  const legacyCount = legacy && !localStorage.getItem(legacyImportedFlag()) ? Object.keys(legacy).length : 0;
+  list.innerHTML = `
+    <div class="empty-state">
+      <div class="empty-emoji">&#127947;&#65039;</div>
+      <h2>La tua scheda è vuota</h2>
+      <p>Crea i tuoi giorni di allenamento e i loro esercizi, oppure parti dalla scheda di esempio e modificala come vuoi.</p>
+      <button class="primary-btn" id="emptyCreateBtn">&#9999;&#65039; Crea la mia scheda</button>
+      <button class="secondary-btn" id="emptyExampleBtn">&#128203; Usa la scheda di esempio</button>
+      ${legacyCount ? `<p class="modal-hint" style="margin-top:12px">Su questo telefono ci sono ${legacyCount} allenamenti salvati con la versione precedente dell'app: usando la scheda di esempio verranno importati nel tuo account.</p>` : ''}
+    </div>`;
+  $('emptyCreateBtn').onclick = openEditor;
+  $('emptyExampleBtn').onclick = loadExample;
+}
+
+function renderExercises() {
+  Object.keys(timers).forEach(k => {
+    if (timers[k].intervalId) { clearInterval(timers[k].intervalId); timers[k].intervalId = null; }
+  });
+  const list = $('exerciseList');
+  list.innerHTML = '';
+  if (!workout.days.length) { renderEmptyState(list); return; }
+  const day = getDay(currentDayId);
+  if (!day.exercises.length) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-emoji">&#128221;</div>
+        <h2>Nessun esercizio in ${escapeHtml(day.name)}</h2>
+        <p>Aggiungi gli esercizi di questo giorno dalla modifica della scheda.</p>
+        <button class="primary-btn" id="emptyDayBtn">&#9999;&#65039; Aggiungi esercizi</button>
+      </div>`;
+    $('emptyDayBtn').onclick = openEditor;
+    return;
+  }
+  day.exercises.forEach((ex, i) => list.appendChild(buildExerciseCard(day, ex, i, { detail: false })));
+  // riattiva gli intervalli dei timer ancora in corsa
+  Object.keys(timers).forEach(k => { if (timers[k].running) resumeTimerInterval(k); });
+}
+
+function loadExample() {
+  if (workout.days.length && !confirm('La scheda attuale verrà sostituita da quella di esempio. Continuare?')) return;
+  workout = buildExampleWorkout();
+  persistWorkout();
+  currentDayId = workout.days[0].id;
+  currentSession = 0;
+  const legacy = readLegacyLocal();
+  if (legacy && !localStorage.getItem(legacyImportedFlag())) {
+    const res = importLegacyEntries(legacy);
+    try { localStorage.setItem(legacyImportedFlag(), '1'); } catch (e) { /* ignora */ }
+    showToast(res.imported ? 'Scheda caricata e ' + res.imported + ' allenamenti importati \u2713' : 'Scheda di esempio caricata \u2713');
+  } else {
+    showToast('Scheda di esempio caricata \u2713');
+  }
+  renderDayTabs();
+  renderAll();
 }
 
 function buildExerciseCard(day, ex, i, opts) {
   opts = opts || {};
-  const sessionIndex = SESSIONS.indexOf(currentSession);
-  const k = keyFor(day, ex.nome, currentSession);
-  const saved = state[k];
-  const last = getLastEntry(day, ex.nome, sessionIndex);
-  const history = getAllHistoryForExercise(day, ex.nome).sort((a, b) => a.index - b.index);
+  const k = logId(day.id, ex.id, currentSession);
+  const saved = logs[k];
+  const last = getLastEntry(day.id, ex.id, currentSession);
+  const history = getAllHistoryForExercise(day.id, ex.id);
 
-  const tKey = timerKeyFor(day, ex.nome);
+  const tKey = ex.id;
   const t = ensureTimer(tKey, ex.rest_seconds || 90);
   const sid = safeId(tKey);
 
@@ -847,13 +1442,12 @@ function buildExerciseCard(day, ex, i, opts) {
   card.className = 'exercise-card' + (hasData(saved) ? ' has-data' : '') + (opts.detail ? ' detail-mode' : '');
 
   const tagHtml = ex.tecnica ? `<span class="ex-tag">${escapeHtml(ex.tecnica)}</span>` : '';
-  const linkHtml = ex.link && ex.link.startsWith('http')
-    ? `<a class="ex-link" href="${ex.link}" target="_blank" rel="noopener">&#9654; Video tutorial</a>` : '';
+  const linkHtml = /^https?:\/\//i.test(ex.link || '')
+    ? `<a class="ex-link" href="${escapeAttr(ex.link)}" target="_blank" rel="noopener">&#9654; Video tutorial</a>` : '';
   const expandBtnHtml = !opts.detail
-    ? `<button type="button" class="expand-btn" id="expand-${i}">&#9974; Apri a schermo intero</button>`
-    : '';
+    ? `<button type="button" class="expand-btn" id="expand-${i}">&#9974; Apri a schermo intero</button>` : '';
 
-  let bodyHtml = '';
+  let bodyHtml;
   if (ex.num_sets > 0) {
     bodyHtml = buildSetsHtml(ex, i, saved);
   } else {
@@ -861,7 +1455,7 @@ function buildExerciseCard(day, ex, i, opts) {
     bodyHtml = `
       <div class="single-note-group">
         <label for="note-${i}">Note / performance sessione</label>
-        <input type="text" id="note-${i}" placeholder="es. 8 min a velocit&agrave; 4" value="${escapeAttr(val)}">
+        <input type="text" id="note-${i}" placeholder="es. ${escapeAttr(ex.reps || '8 min a velocità 4')}" value="${escapeAttr(val)}">
       </div>`;
   }
 
@@ -871,9 +1465,9 @@ function buildExerciseCard(day, ex, i, opts) {
       ${tagHtml}
     </div>
     <div class="ex-meta">
-      ${ex.sets ? `<span>Serie: <b>${escapeHtml(ex.sets)}</b></span>` : ''}
-      ${ex.reps ? `<span>Reps: <b>${escapeHtml(ex.reps)}</b></span>` : ''}
-      ${ex.rest ? `<span>Recupero: <b>${escapeHtml(ex.rest)}</b></span>` : ''}
+      ${ex.num_sets > 0 ? `<span>Serie: <b>${ex.num_sets}</b></span>` : ''}
+      ${ex.reps ? `<span>${ex.num_sets > 0 ? 'Reps' : 'Durata'}: <b>${escapeHtml(repsLabel(ex))}</b></span>` : ''}
+      ${ex.rest_seconds ? `<span>Recupero: <b>${fmtRest(ex.rest_seconds)}</b></span>` : ''}
     </div>
     ${ex.note ? `<div class="ex-note">${escapeHtml(ex.note)}</div>` : ''}
     ${linkHtml}
@@ -896,14 +1490,12 @@ function buildExerciseCard(day, ex, i, opts) {
     </div>
   `;
 
-  if (!opts.detail) {
-    card.querySelector(`#expand-${i}`).onclick = () => openExerciseDetail(day, i);
-  }
+  if (!opts.detail) card.querySelector(`#expand-${i}`).onclick = () => openExerciseDetail(day.id, i);
 
-  // quick chips (basati sull'ultimo peso dell'ultima serie registrata)
   if (ex.num_sets > 0) {
     const chipsEl = card.querySelector(`#chips-${i}`);
-    const lastSet = last && last.sets && last.sets.length ? last.sets[last.sets.length - 1] : null;
+    const lastSet = last && last.sets && last.sets.length
+      ? [...last.sets].reverse().find(s => s.peso) : null;
     if (lastSet && lastSet.peso) {
       const chip = document.createElement('div');
       chip.className = 'quick-chip last';
@@ -911,7 +1503,7 @@ function buildExerciseCard(day, ex, i, opts) {
       chip.onclick = () => { const el = card.querySelector(`#set-${i}-0-peso`); if (el) el.value = lastSet.peso; };
       chipsEl.appendChild(chip);
       [-2.5, -1.25, 1.25, 2.5, 5].forEach(delta => {
-        const val = parseFloat(lastSet.peso) + delta;
+        const val = Math.round((parseFloat(String(lastSet.peso).replace(',', '.')) + delta) * 100) / 100;
         if (val > 0) {
           const c = document.createElement('div');
           c.className = 'quick-chip';
@@ -921,20 +1513,16 @@ function buildExerciseCard(day, ex, i, opts) {
         }
       });
     }
-
     for (let si = 1; si < ex.num_sets; si++) {
       const btn = card.querySelector(`#copy-${i}-${si}`);
-      if (btn) {
-        btn.onclick = () => {
-          const prevInput = card.querySelector(`#set-${i}-${si - 1}-peso`);
-          const curInput = card.querySelector(`#set-${i}-${si}-peso`);
-          if (prevInput && curInput) curInput.value = prevInput.value;
-        };
-      }
+      if (btn) btn.onclick = () => {
+        const prev = card.querySelector(`#set-${i}-${si - 1}-peso`);
+        const cur = card.querySelector(`#set-${i}-${si}-peso`);
+        if (prev && cur) cur.value = prev.value;
+      };
     }
   }
 
-  // save
   card.querySelector(`#save-${i}`).onclick = () => {
     let entry;
     if (ex.num_sets > 0) {
@@ -953,33 +1541,27 @@ function buildExerciseCard(day, ex, i, opts) {
       if (!note) return;
       entry = { note, timestamp: new Date().toISOString() };
     }
-    state[k] = entry;
-    saveState();
+    saveLog(day.id, ex.id, currentSession, entry);
     showToast('Salvato \u2713');
-    if (opts.detail) {
-      setTimeout(() => { closeExerciseDetail(); }, 550);
-    } else {
-      renderAll();
-    }
+    if (opts.detail) setTimeout(closeExerciseDetail, 550);
+    else { if (document.activeElement) document.activeElement.blur(); renderAll(); }
   };
 
-  // storico
   if (history.length > 0) {
     const toggle = card.querySelector(`#toggle-${i}`);
     const histDiv = card.querySelector(`#history-${i}`);
     histDiv.innerHTML = history.map(h => {
       const summary = ex.num_sets > 0
-        ? (h.sets || []).map(s => `${s.peso || '-'}kg&times;${s.reps || '-'}`).join(', ')
+        ? (h.sets || []).map(s => `${escapeHtml(s.peso || '-')}kg&times;${escapeHtml(s.reps || '-')}`).join(', ')
         : escapeHtml(h.note || '-');
       return `<div class="history-item"><span>${h.session}</span><b>${summary}</b></div>`;
     }).join('');
     toggle.onclick = () => {
       histDiv.classList.toggle('open');
-      toggle.textContent = histDiv.classList.contains('open') ? `Storico (${history.length}) \u25B4` : `Storico (${history.length}) \u25BE`;
+      toggle.textContent = `Storico (${history.length}) ` + (histDiv.classList.contains('open') ? '\u25B4' : '\u25BE');
     };
   }
 
-  // timer controls
   card.querySelector(`#timerStart-${sid}`).onclick = () => startTimer(tKey);
   card.querySelector(`#timerPause-${sid}`).onclick = () => pauseTimer(tKey);
   card.querySelector(`#timerReset-${sid}`).onclick = () => resetTimer(tKey, t.total);
@@ -988,7 +1570,7 @@ function buildExerciseCard(day, ex, i, opts) {
   [30, 60, 90, 120, 180].forEach(secs => {
     const p = document.createElement('div');
     p.className = 'timer-preset' + (t.total === secs ? ' active' : '');
-    p.textContent = secs < 60 ? secs + 's' : (secs / 60) + 'm' + (secs % 60 ? (secs % 60) + 's' : '');
+    p.textContent = secs < 60 ? secs + 's' : (Math.floor(secs / 60)) + 'm' + (secs % 60 ? (secs % 60) + 's' : '');
     p.onclick = () => {
       resetTimer(tKey, secs);
       presetsEl.querySelectorAll('.timer-preset').forEach(el => el.classList.remove('active'));
@@ -998,57 +1580,16 @@ function buildExerciseCard(day, ex, i, opts) {
   });
 
   updateTimerDisplay(tKey);
-
   return card;
 }
 
-function renderExercises() {
-  // ferma gli interval attivi (non lo stato "running") prima di ridisegnare, per evitare interval fantasma
-  Object.keys(timers).forEach(k => {
-    if (timers[k].intervalId) { clearInterval(timers[k].intervalId); timers[k].intervalId = null; }
-  });
-
-  const list = document.getElementById('exerciseList');
-  list.innerHTML = '';
-  const exercises = WORKOUT_DATA[currentDay];
-  exercises.forEach((ex, i) => {
-    const card = buildExerciseCard(currentDay, ex, i, { detail: false });
-    list.appendChild(card);
-  });
-}
-
-function openExerciseDetail(day, i) {
-  // ferma i timer attivi e svuota la lista: solo UNA copia della card di questo esercizio
-  // deve esistere nel DOM alla volta, per evitare id duplicati fra lista e dettaglio
-  Object.keys(timers).forEach(k => {
-    if (timers[k].intervalId) { clearInterval(timers[k].intervalId); timers[k].intervalId = null; }
-  });
-  document.getElementById('exerciseList').innerHTML = '';
-
-  const ex = WORKOUT_DATA[day][i];
-  const detailContent = document.getElementById('detailContent');
-  detailContent.innerHTML = '';
-  const card = buildExerciseCard(day, ex, i, { detail: true });
-  detailContent.appendChild(card);
-
-  document.getElementById('exerciseDetailView').classList.add('open');
-  window.scrollTo(0, 0);
-}
-
-function closeExerciseDetail() {
-  document.getElementById('exerciseDetailView').classList.remove('open');
-  document.getElementById('detailContent').innerHTML = '';
-  renderAll();
-}
-
-
 function buildSetsHtml(ex, i, saved) {
+  const targets = targetsFor(ex);
   let html = '';
   for (let si = 0; si < ex.num_sets; si++) {
-    const target = ex.set_targets[si] || '';
-    const isNewBlock = si > 0 && ex.set_targets[si] !== ex.set_targets[si - 1];
-    if (isNewBlock) {
-      html += `<div class="block-divider">&#8593; da qui aumenta il carico (target: ${escapeHtml(target)})</div>`;
+    const target = targets[si] || '';
+    if (si > 0 && targets[si] !== targets[si - 1]) {
+      html += `<div class="block-divider">&#8593; da qui cambia il target (${escapeHtml(target)}): adegua il carico</div>`;
     }
     const savedSet = saved && saved.sets && saved.sets[si] ? saved.sets[si] : { peso: '', reps: '' };
     const copyBtn = si > 0
@@ -1058,12 +1599,10 @@ function buildSetsHtml(ex, i, saved) {
       <div class="set-row">
         <div class="set-label"><b>Serie ${si + 1}</b>${target ? 'target: ' + escapeHtml(target) : ''}</div>
         <div class="set-input-group">
-          <input type="number" inputmode="decimal" step="0.5" min="0" placeholder="kg"
-                 id="set-${i}-${si}-peso" value="${escapeAttr(savedSet.peso)}">
+          <input type="number" inputmode="decimal" step="0.5" min="0" placeholder="kg" id="set-${i}-${si}-peso" value="${escapeAttr(savedSet.peso)}">
         </div>
         <div class="set-input-group">
-          <input type="text" inputmode="text" placeholder="${escapeAttr(target || 'reps')}"
-                 id="set-${i}-${si}-reps" value="${escapeAttr(savedSet.reps)}">
+          <input type="text" inputmode="text" placeholder="${escapeAttr(target || 'reps')}" id="set-${i}-${si}-reps" value="${escapeAttr(savedSet.reps)}">
         </div>
         ${copyBtn}
       </div>`;
@@ -1071,35 +1610,40 @@ function buildSetsHtml(ex, i, saved) {
   return html;
 }
 
-function escapeHtml(s) {
-  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function openExerciseDetail(dayId, i) {
+  Object.keys(timers).forEach(k => {
+    if (timers[k].intervalId) { clearInterval(timers[k].intervalId); timers[k].intervalId = null; }
+  });
+  $('exerciseList').innerHTML = '';
+  const day = getDay(dayId);
+  const content = $('detailContent');
+  content.innerHTML = '';
+  content.appendChild(buildExerciseCard(day, day.exercises[i], i, { detail: true }));
+  Object.keys(timers).forEach(k => { if (timers[k].running) resumeTimerInterval(k); });
+  $('exerciseDetailView').classList.add('open');
+  window.scrollTo(0, 0);
 }
-function escapeAttr(s) {
-  return escapeHtml(s).replace(/"/g, '&quot;');
+function closeExerciseDetail() {
+  $('exerciseDetailView').classList.remove('open');
+  $('detailContent').innerHTML = '';
+  renderDayTabs();
+  renderAll();
 }
+$('detailBackBtn').onclick = closeExerciseDetail;
 
-// ---------- TIMER (accurato su orologio reale + wake lock) ----------
+// ================== TIMER ==================
 function ensureTimer(tKey, defaultSeconds) {
-  if (!timers[tKey]) {
-    timers[tKey] = { total: defaultSeconds, remainingWhenPaused: defaultSeconds, endAt: null, running: false, intervalId: null };
-  }
+  if (!timers[tKey]) timers[tKey] = { total: defaultSeconds, remainingWhenPaused: defaultSeconds, endAt: null, running: false, intervalId: null };
   return timers[tKey];
 }
-
 function currentRemaining(t) {
-  if (t.running && t.endAt) {
-    return Math.max(0, Math.round((t.endAt - Date.now()) / 1000));
-  }
+  if (t.running && t.endAt) return Math.max(0, Math.round((t.endAt - Date.now()) / 1000));
   return t.remainingWhenPaused;
 }
-
 function fmtTime(totalSeconds) {
   const s = Math.max(0, Math.round(totalSeconds));
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return String(m).padStart(2, '0') + ":" + String(sec).padStart(2, '0');
+  return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
 }
-
 function updateTimerDisplay(tKey) {
   const t = timers[tKey];
   if (!t) return;
@@ -1111,13 +1655,11 @@ function updateTimerDisplay(tKey) {
   const wakeInd = document.getElementById('wakeInd-' + safeId(tKey));
   if (wakeInd) wakeInd.classList.toggle('on', t.running && !!wakeLockRef);
 }
-
 function beep() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     for (let i = 0; i < 3; i++) {
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
+      const o = ctx.createOscillator(), g = ctx.createGain();
       o.connect(g); g.connect(ctx.destination);
       o.type = 'sine'; o.frequency.value = 880;
       g.gain.setValueAtTime(0.25, ctx.currentTime + i * 0.35);
@@ -1125,10 +1667,9 @@ function beep() {
       o.start(ctx.currentTime + i * 0.35);
       o.stop(ctx.currentTime + i * 0.35 + 0.3);
     }
-  } catch (e) { /* audio non disponibile, pazienza */ }
+  } catch (e) { /* audio non disponibile */ }
   if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
 }
-
 function finishTimer(tKey) {
   const t = timers[tKey];
   if (!t) return;
@@ -1140,7 +1681,16 @@ function finishTimer(tKey) {
   showToast('Recupero terminato! \u23F1\uFE0F');
   maybeReleaseWakeLock();
 }
-
+function resumeTimerInterval(tKey) {
+  const t = timers[tKey];
+  if (!t || !t.running) return;
+  if (t.intervalId) clearInterval(t.intervalId);
+  t.intervalId = setInterval(() => {
+    updateTimerDisplay(tKey);
+    if (currentRemaining(t) <= 0) finishTimer(tKey);
+  }, 250);
+  updateTimerDisplay(tKey);
+}
 function startTimer(tKey) {
   const t = timers[tKey];
   if (!t || t.running) return;
@@ -1148,14 +1698,8 @@ function startTimer(tKey) {
   t.endAt = Date.now() + t.remainingWhenPaused * 1000;
   t.running = true;
   requestWakeLock();
-  t.intervalId = setInterval(() => {
-    const remaining = currentRemaining(t);
-    updateTimerDisplay(tKey);
-    if (remaining <= 0) finishTimer(tKey);
-  }, 250);
-  updateTimerDisplay(tKey);
+  resumeTimerInterval(tKey);
 }
-
 function pauseTimer(tKey) {
   const t = timers[tKey];
   if (!t || !t.running) return;
@@ -1166,7 +1710,6 @@ function pauseTimer(tKey) {
   updateTimerDisplay(tKey);
   maybeReleaseWakeLock();
 }
-
 function resetTimer(tKey, seconds) {
   const t = timers[tKey];
   if (!t) return;
@@ -1178,7 +1721,6 @@ function resetTimer(tKey, seconds) {
   updateTimerDisplay(tKey);
   maybeReleaseWakeLock();
 }
-
 async function requestWakeLock() {
   if (!('wakeLock' in navigator)) return;
   try {
@@ -1187,227 +1729,360 @@ async function requestWakeLock() {
     wakeLockRef.addEventListener('release', () => { wakeLockRef = null; });
   } catch (e) { wakeLockRef = null; }
 }
-
 function maybeReleaseWakeLock() {
-  const anyRunning = Object.values(timers).some(t => t.running);
-  if (!anyRunning && wakeLockRef) {
+  if (!Object.values(timers).some(t => t.running) && wakeLockRef) {
     wakeLockRef.release().catch(() => {});
     wakeLockRef = null;
   }
 }
-
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    // ricalcola tutti i timer attivi dall'orologio reale (corregge eventuale rallentamento in background)
-    let anyRunning = false;
-    Object.keys(timers).forEach(tKey => {
-      const t = timers[tKey];
-      if (t.running) {
-        anyRunning = true;
-        const remaining = currentRemaining(t);
-        if (remaining <= 0) {
-          finishTimer(tKey);
-        } else {
-          updateTimerDisplay(tKey);
-        }
-      }
-    });
-    if (anyRunning) requestWakeLock();
-  }
+  if (document.visibilityState !== 'visible') return;
+  let anyRunning = false;
+  Object.keys(timers).forEach(tKey => {
+    const t = timers[tKey];
+    if (!t.running) return;
+    anyRunning = true;
+    if (currentRemaining(t) <= 0) finishTimer(tKey); else updateTimerDisplay(tKey);
+  });
+  if (anyRunning) requestWakeLock();
 });
 
-// ---------- TOAST ----------
+// ================== TOAST ==================
+let toastTimeout = null;
 function showToast(msg) {
-  const t = document.getElementById('toast');
+  const t = $('toast');
   t.textContent = msg;
   t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 1800);
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => t.classList.remove('show'), 1900);
 }
 
-// ---------- ESPORTAZIONE TESTO / PDF ----------
-function formatSetsLine(entry, ex) {
-  if (ex.num_sets > 0) {
-    return (entry.sets || []).map(s => (s.peso || '-') + 'kg x ' + (s.reps || '-')).join(', ');
+// ================== EDITOR SCHEDA ==================
+let editingEx = null; // { di, ei } (ei = -1 per nuovo)
+
+function openEditor() {
+  if (document.activeElement) document.activeElement.blur();
+  renderEditor();
+  $('editorView').classList.add('open');
+  $('editorView').scrollTop = 0;
+}
+function closeEditor() {
+  if (document.activeElement) document.activeElement.blur();
+  $('editorView').classList.remove('open');
+  ensureCurrentDay();
+  renderDayTabs();
+  renderAll();
+}
+$('editorDoneBtn').onclick = closeEditor;
+$('openEditorBtn').onclick = openEditor;
+
+function exerciseSummary(ex) {
+  const parts = [];
+  if (ex.num_sets > 0) parts.push(ex.num_sets + ' serie' + (ex.reps ? ' × ' + repsLabel(ex) : ''));
+  else parts.push(ex.reps ? repsLabel(ex) : 'solo note');
+  if (ex.rest_seconds) parts.push('rec. ' + fmtRest(ex.rest_seconds));
+  if (ex.tecnica) parts.push(ex.tecnica);
+  return parts.join(', ');
+}
+
+function renderEditor() {
+  const c = $('editorContent');
+  let html = '';
+  if (!workout.days.length) {
+    html += `<p class="modal-hint" style="margin-bottom:12px">Inizia aggiungendo un giorno di allenamento (es. "Giorno 1" o "Petto e tricipiti"), poi i suoi esercizi.</p>`;
   }
+  workout.days.forEach((d, di) => {
+    const last = workout.days.length - 1;
+    html += `
+      <div class="ed-day">
+        <div class="ed-day-head">
+          <input class="ed-day-name" data-di="${di}" value="${escapeAttr(d.name)}" placeholder="Nome del giorno" aria-label="Nome del giorno">
+          <button class="icon-btn" data-act="day-up" data-di="${di}" ${di === 0 ? 'disabled' : ''} aria-label="Sposta su">&#8593;</button>
+          <button class="icon-btn" data-act="day-down" data-di="${di}" ${di === last ? 'disabled' : ''} aria-label="Sposta giù">&#8595;</button>
+          <button class="icon-btn del" data-act="day-del" data-di="${di}" aria-label="Elimina giorno">&#10005;</button>
+        </div>
+        ${d.exercises.length ? d.exercises.map((ex, ei) => `
+          <div class="ed-ex">
+            <div class="ed-ex-info" data-act="ex-edit" data-di="${di}" data-ei="${ei}">
+              <b>${escapeHtml(ex.nome || '(senza nome)')}</b>
+              <span>${escapeHtml(exerciseSummary(ex))}</span>
+            </div>
+            <button class="icon-btn" data-act="ex-up" data-di="${di}" data-ei="${ei}" ${ei === 0 ? 'disabled' : ''} aria-label="Sposta su">&#8593;</button>
+            <button class="icon-btn" data-act="ex-down" data-di="${di}" data-ei="${ei}" ${ei === d.exercises.length - 1 ? 'disabled' : ''} aria-label="Sposta giù">&#8595;</button>
+            <button class="icon-btn del" data-act="ex-del" data-di="${di}" data-ei="${ei}" aria-label="Elimina esercizio">&#10005;</button>
+          </div>`).join('') : `<div class="ed-empty">Nessun esercizio</div>`}
+        <button class="ed-add" data-act="ex-add" data-di="${di}">+ Aggiungi esercizio</button>
+      </div>`;
+  });
+  html += `<button class="primary-btn" data-act="day-add">+ Aggiungi giorno</button>`;
+  if (!workout.days.length) {
+    html += `<button class="secondary-btn" data-act="load-example">&#128203; Usa la scheda di esempio</button>`;
+  }
+
+  let deloadOpts = `<option value="0"${!workout.deloadSession ? ' selected' : ''}>Nessuna</option>`;
+  for (let i = 1; i <= numSessions(); i++) {
+    deloadOpts += `<option value="${i}"${workout.deloadSession === i ? ' selected' : ''}>Sessione ${i}</option>`;
+  }
+  html += `
+    <div class="ed-settings">
+      <h3>Ciclo di sessioni</h3>
+      <p>Quante volte ripeti la scheda prima di cambiarla, e quale sessione è di scarico (carichi ridotti).</p>
+      <div class="ed-row">
+        <div class="field">
+          <label for="edSessions">Sessioni</label>
+          <input type="number" id="edSessions" min="1" max="52" inputmode="numeric" value="${numSessions()}">
+        </div>
+        <div class="field">
+          <label for="edDeload">Scarico</label>
+          <select id="edDeload">${deloadOpts}</select>
+        </div>
+      </div>
+      <button class="secondary-btn" data-act="load-example">&#128203; Sostituisci con la scheda di esempio</button>
+    </div>`;
+  c.innerHTML = html;
+
+  c.querySelectorAll('.ed-day-name').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const d = workout.days[+inp.dataset.di];
+      d.name = inp.value.trim() || 'Giorno ' + (+inp.dataset.di + 1);
+      inp.value = d.name;
+      persistWorkout();
+    });
+  });
+  $('edSessions').addEventListener('change', () => {
+    let n = parseInt($('edSessions').value, 10);
+    if (!n || n < 1) n = 1;
+    if (n > 52) n = 52;
+    workout.sessions = n;
+    if (workout.deloadSession > n) workout.deloadSession = 0;
+    persistWorkout();
+    renderEditor();
+  });
+  $('edDeload').addEventListener('change', () => {
+    workout.deloadSession = parseInt($('edDeload').value, 10) || 0;
+    persistWorkout();
+  });
+}
+
+function swap(arr, a, b) { const t = arr[a]; arr[a] = arr[b]; arr[b] = t; }
+
+$('editorContent').addEventListener('click', (e) => {
+  const el = e.target.closest('[data-act]');
+  if (!el || el.disabled) return;
+  const act = el.dataset.act;
+  const di = el.dataset.di != null ? +el.dataset.di : -1;
+  const ei = el.dataset.ei != null ? +el.dataset.ei : -1;
+  const day = di >= 0 ? workout.days[di] : null;
+
+  if (act === 'day-add') {
+    const name = 'Giorno ' + (workout.days.length + 1);
+    workout.days.push({ id: newId('d'), name, exercises: [] });
+    persistWorkout();
+    renderEditor();
+    const inputs = $('editorContent').querySelectorAll('.ed-day-name');
+    const lastInput = inputs[inputs.length - 1];
+    if (lastInput) { lastInput.scrollIntoView({ block: 'center' }); lastInput.select(); }
+    return;
+  }
+  if (act === 'load-example') {
+    loadExample();
+    renderEditor();
+    return;
+  }
+  if (act === 'day-up' && di > 0) { swap(workout.days, di, di - 1); }
+  else if (act === 'day-down' && di < workout.days.length - 1) { swap(workout.days, di, di + 1); }
+  else if (act === 'day-del') {
+    const n = Object.values(logs).filter(l => l.dayId === day.id).length;
+    if (!confirm(`Eliminare "${day.name}" con tutti i suoi esercizi?` + (n ? ` Verranno cancellati anche ${n} allenamenti registrati.` : ''))) return;
+    deleteLogs(l => l.dayId === day.id);
+    workout.days.splice(di, 1);
+  }
+  else if (act === 'ex-add') { openExForm(di, -1); return; }
+  else if (act === 'ex-edit') { openExForm(di, ei); return; }
+  else if (act === 'ex-up' && ei > 0) { swap(day.exercises, ei, ei - 1); }
+  else if (act === 'ex-down' && ei < day.exercises.length - 1) { swap(day.exercises, ei, ei + 1); }
+  else if (act === 'ex-del') {
+    const ex = day.exercises[ei];
+    const n = Object.values(logs).filter(l => l.exId === ex.id).length;
+    if (!confirm(`Eliminare "${ex.nome}"?` + (n ? ` Verranno cancellati anche ${n} allenamenti registrati.` : ''))) return;
+    deleteLogs(l => l.exId === ex.id);
+    day.exercises.splice(ei, 1);
+  }
+  else return;
+  persistWorkout();
+  renderEditor();
+});
+
+function openExForm(di, ei) {
+  editingEx = { di, ei };
+  const ex = ei >= 0 ? workout.days[di].exercises[ei]
+    : { nome: '', num_sets: 3, reps: '8-12', rest_seconds: 90, tecnica: '', note: '', link: '' };
+  $('exModalTitle').textContent = ei >= 0 ? 'Modifica esercizio' : 'Nuovo esercizio in ' + workout.days[di].name;
+  $('exfNome').value = ex.nome;
+  $('exfSets').value = ex.num_sets;
+  $('exfReps').value = ex.reps;
+  $('exfRest').value = ex.rest_seconds || '';
+  $('exfTecnica').value = ex.tecnica;
+  $('exfNote').value = ex.note;
+  $('exfLink').value = ex.link;
+  $('exfError').className = 'auth-msg err';
+  const chips = $('restChips');
+  chips.innerHTML = '';
+  [30, 60, 90, 120, 180].forEach(s => {
+    const c = document.createElement('div');
+    c.className = 'quick-chip';
+    c.textContent = fmtRest(s);
+    c.onclick = () => { $('exfRest').value = s; };
+    chips.appendChild(c);
+  });
+  $('exModal').classList.add('open');
+  if (ei < 0) setTimeout(() => $('exfNome').focus(), 50);
+}
+
+$('exfSave').onclick = () => {
+  const nome = $('exfNome').value.trim();
+  const err = $('exfError');
+  if (!nome) { err.textContent = "Scrivi il nome dell'esercizio."; err.className = 'auth-msg err show'; return; }
+  const link = $('exfLink').value.trim();
+  if (link && !/^https?:\/\//i.test(link)) { err.textContent = 'Il link deve iniziare con https://'; err.className = 'auth-msg err show'; return; }
+  const { di, ei } = editingEx;
+  const day = workout.days[di];
+  const data = {
+    nome,
+    num_sets: Math.min(12, Math.max(0, parseInt($('exfSets').value, 10) || 0)),
+    reps: $('exfReps').value.trim(),
+    rest_seconds: Math.max(0, parseInt($('exfRest').value, 10) || 0),
+    tecnica: $('exfTecnica').value.trim(),
+    note: $('exfNote').value.trim(),
+    link
+  };
+  if (ei >= 0) Object.assign(day.exercises[ei], data);
+  else day.exercises.push(Object.assign({ id: newId('e') }, data));
+  if (ei >= 0) {
+    const t = timers[day.exercises[ei].id];
+    if (t && !t.running) resetTimer(day.exercises[ei].id, data.rest_seconds || 90);
+  }
+  persistWorkout();
+  $('exModal').classList.remove('open');
+  renderEditor();
+  showToast(ei >= 0 ? 'Esercizio aggiornato \u2713' : 'Esercizio aggiunto \u2713');
+};
+
+// ================== ESPORTAZIONE ==================
+function formatSetsLine(entry, ex) {
+  if (ex.num_sets > 0) return (entry.sets || []).map(s => (s.peso || '-') + 'kg x ' + (s.reps || '-')).join(', ');
   return entry.note || '-';
 }
-
 function buildDaySummary(day) {
-  let text = "=== " + day + " ===\n";
+  let text = '=== ' + day.name + ' ===\n';
   let found = false;
-  WORKOUT_DATA[day].forEach(ex => {
-    const hist = getAllHistoryForExercise(day, ex.nome).sort((a, b) => a.index - b.index);
-    if (hist.length > 0) {
-      found = true;
-      text += ex.nome + ":\n";
-      hist.forEach(h => { text += "  " + h.session + ": " + formatSetsLine(h, ex) + "\n"; });
-    }
+  day.exercises.forEach(ex => {
+    const hist = getAllHistoryForExercise(day.id, ex.id);
+    if (!hist.length) return;
+    found = true;
+    text += ex.nome + ':\n';
+    hist.forEach(h => { text += '  ' + h.session + ': ' + formatSetsLine(h, ex) + '\n'; });
   });
-  if (!found) text += "  (nessun dato salvato per questo giorno)\n";
-  return text + "\n";
+  if (!found) text += '  (nessun dato salvato per questo giorno)\n';
+  return text + '\n';
 }
-
+function exportDays() {
+  return currentExportMode === 'all' ? workout.days : [getDay(currentDayId)].filter(Boolean);
+}
 function exportData(mode) {
   currentExportMode = mode;
-  let text = "RIEPILOGO ALLENAMENTI\n";
-  text += "Generato: " + new Date().toLocaleString('it-IT') + "\n\n";
-  if (mode === 'all') {
-    Object.keys(WORKOUT_DATA).forEach(day => { text += buildDaySummary(day); });
-  } else {
-    text += buildDaySummary(currentDay);
-  }
-  document.getElementById('exportText').value = text;
+  let text = 'RIEPILOGO ALLENAMENTI\nGenerato: ' + new Date().toLocaleString('it-IT') + '\n\n';
+  exportDays().forEach(d => { text += buildDaySummary(d); });
+  $('exportText').value = text;
 }
-
 function openExportModal() {
-  const toggleDay = document.getElementById('toggleDay');
-  const toggleAll = document.getElementById('toggleAll');
-  toggleDay.textContent = currentDay;
+  if (!workout.days.length) { showToast('Prima crea la tua scheda'); return; }
+  const toggleDay = $('toggleDay'), toggleAll = $('toggleAll');
+  toggleDay.textContent = getDay(currentDayId).name;
   toggleDay.classList.add('active');
   toggleAll.classList.remove('active');
   toggleDay.onclick = () => { toggleDay.classList.add('active'); toggleAll.classList.remove('active'); exportData('day'); };
   toggleAll.onclick = () => { toggleAll.classList.add('active'); toggleDay.classList.remove('active'); exportData('all'); };
   exportData('day');
-  document.getElementById('exportModal').classList.add('open');
+  $('pdfFallbackLink').innerHTML = '';
+  $('exportModal').classList.add('open');
 }
+$('openExportBtn').onclick = openExportModal;
 
 function buildPdfDaySection(doc, day, startY, marginX, pageWidth) {
   let y = startY;
   const pageBottom = 790;
-
   if (y > pageBottom - 40) { doc.addPage(); y = 50; }
-  doc.setFontSize(13);
-  doc.setFont(undefined, 'bold');
-  doc.setTextColor(20, 20, 20);
-  doc.text(day, marginX, y);
+  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(20, 20, 20);
+  doc.text(day.name, marginX, y);
   y += 6;
-  doc.setDrawColor(232, 69, 60);
-  doc.setLineWidth(1.2);
+  doc.setDrawColor(232, 69, 60); doc.setLineWidth(1.2);
   doc.line(marginX, y, pageWidth - marginX, y);
   y += 16;
-
-  let anyExercise = false;
-  WORKOUT_DATA[day].forEach(ex => {
-    const hist = getAllHistoryForExercise(day, ex.nome).sort((a, b) => a.index - b.index);
-    if (hist.length === 0) return;
-    anyExercise = true;
-
+  let any = false;
+  day.exercises.forEach(ex => {
+    const hist = getAllHistoryForExercise(day.id, ex.id);
+    if (!hist.length) return;
+    any = true;
     if (y > pageBottom - 60) { doc.addPage(); y = 50; }
-    doc.setFontSize(11);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(20, 20, 20);
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(20, 20, 20);
     doc.text(ex.nome, marginX, y);
     y += 4;
-
-    const head = [['Sessione', ex.num_sets > 0 ? 'Serie (peso x reps)' : 'Note']];
-    const body = hist.map(h => [h.session, formatSetsLine(h, ex)]);
     doc.autoTable({
       startY: y + 4,
-      head: head,
-      body: body,
+      head: [['Sessione', ex.num_sets > 0 ? 'Serie (peso x reps)' : 'Note']],
+      body: hist.map(h => [h.session, formatSetsLine(h, ex)]),
       margin: { left: marginX, right: marginX },
       styles: { fontSize: 9, cellPadding: 5, textColor: [20, 20, 20] },
       headStyles: { fillColor: [232, 69, 60], textColor: [255, 255, 255], fontStyle: 'bold' },
       alternateRowStyles: { fillColor: [245, 245, 245] },
-      theme: 'grid',
+      theme: 'grid'
     });
     y = doc.lastAutoTable.finalY + 18;
   });
-
-  if (!anyExercise) {
-    doc.setFontSize(9);
-    doc.setFont(undefined, 'italic');
-    doc.setTextColor(150, 150, 150);
+  if (!any) {
+    doc.setFontSize(9); doc.setFont(undefined, 'italic'); doc.setTextColor(150, 150, 150);
     doc.text('Nessun dato salvato per questo giorno.', marginX, y);
     doc.setFont(undefined, 'normal');
     y += 20;
   }
-
   return y + 8;
 }
 
-async function getDownloadsCapability() {
-  if (!window.claude || typeof window.claude.use !== 'function') return null;
-  try {
-    return await window.claude.use('downloads');
-  } catch (e) {
-    return null;
-  }
-}
-
-async function generatePDF() {
+function generatePDF() {
   if (!window.jspdf || !window.jspdf.jsPDF) {
-    alert('La libreria per generare il PDF non si e\' ancora caricata (serve una connessione a internet la prima volta che la usi in questa pagina). Usa "Vedi riepilogo" qui sopra invece: funziona sempre, anche offline.');
+    alert('La libreria per il PDF non si è ancora caricata (serve internet la prima volta). Usa "Vedi riepilogo": funziona sempre, anche offline.');
     return;
   }
-  document.getElementById('pdfFallbackLink').innerHTML = '';
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  const marginX = 40;
-  const pageWidth = doc.internal.pageSize.getWidth();
+  $('pdfFallbackLink').innerHTML = '';
+  const doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
+  const marginX = 40, pageWidth = doc.internal.pageSize.getWidth();
   let y = 50;
-
-  doc.setFontSize(18);
-  doc.setFont(undefined, 'bold');
-  doc.setTextColor(20, 20, 20);
+  doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(20, 20, 20);
   doc.text('Riepilogo Allenamento', marginX, y);
   y += 18;
-  doc.setFontSize(9);
-  doc.setFont(undefined, 'normal');
-  doc.setTextColor(120, 120, 120);
+  doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(120, 120, 120);
   doc.text('Generato il ' + new Date().toLocaleString('it-IT'), marginX, y);
   y += 22;
-
-  if (currentExportMode === 'all') {
-    Object.keys(WORKOUT_DATA).forEach(day => { y = buildPdfDaySection(doc, day, y, marginX, pageWidth); });
-  } else {
-    y = buildPdfDaySection(doc, currentDay, y, marginX, pageWidth);
-  }
-
+  exportDays().forEach(d => { y = buildPdfDaySection(doc, d, y, marginX, pageWidth); });
   let blob;
-  try {
-    blob = doc.output('blob');
-  } catch (e) {
-    alert('Non sono riuscito a generare il PDF. Usa "Vedi riepilogo" qui sopra come alternativa.');
-    return;
-  }
-  const fileName = 'riepilogo_allenamento_' + new Date().toISOString().slice(0, 10) + '.pdf';
-
-  // Preferiamo il salvataggio nativo offerto dalla pagina, quando disponibile:
-  // e' il modo piu' affidabile per ottenere davvero il file (a differenza di un
-  // link di download "silenzioso", che alcuni browser/webview mobile ignorano).
-  const downloads = await getDownloadsCapability();
-  if (downloads) {
-    try {
-      const result = await downloads.save({ filename: fileName, data: blob });
-      showToast(result.status === 'saved' ? 'PDF salvato \u2713' : 'PDF inviato \u2713');
-    } catch (e) {
-      if (e && e.code === 'declined') return;
-      alert('Non sono riuscito a salvare il PDF. Usa "Vedi riepilogo" qui sopra come alternativa.');
-    }
-    return;
-  }
-
-  // Fallback per quando la pagina viene aperta come semplice file HTML (non come artifact):
-  // apriamo un'anteprima in una nuova scheda, da cui si puo' salvare/condividere manualmente.
+  try { blob = doc.output('blob'); } catch (e) { alert('Non sono riuscito a generare il PDF. Usa "Vedi riepilogo".'); return; }
   const url = URL.createObjectURL(blob);
   const opened = window.open(url, '_blank');
   if (!opened) {
-    const fallback = document.getElementById('pdfFallbackLink');
-    fallback.innerHTML = '<a href="' + url + '" target="_blank" rel="noopener" class="pdf-fallback-link">Il browser ha bloccato l\'apertura automatica &mdash; tocca qui per aprire il PDF</a>';
+    $('pdfFallbackLink').innerHTML = '<a href="' + url + '" target="_blank" rel="noopener" class="pdf-fallback-link">Tocca qui per aprire il PDF</a>';
   } else {
     showToast('PDF aperto in una nuova scheda');
   }
 }
-document.getElementById('pdfBtn').addEventListener('click', generatePDF);
+$('pdfBtn').onclick = generatePDF;
 
-// ---------- VISTA RIEPILOGO PER SCREENSHOT ----------
 function buildSummaryDaySection(day) {
-  let html = `<div class="summary-day-heading">${escapeHtml(day)}</div>`;
+  let html = `<div class="summary-day-heading">${escapeHtml(day.name)}</div>`;
   let found = false;
-  WORKOUT_DATA[day].forEach(ex => {
-    const hist = getAllHistoryForExercise(day, ex.nome).sort((a, b) => a.index - b.index);
-    if (hist.length === 0) return;
+  day.exercises.forEach(ex => {
+    const hist = getAllHistoryForExercise(day.id, ex.id);
+    if (!hist.length) return;
     found = true;
     html += `<div class="summary-ex-block">
       <div class="summary-ex-name">${escapeHtml(ex.nome)}</div>
@@ -1420,98 +2095,85 @@ function buildSummaryDaySection(day) {
   if (!found) html += `<div class="summary-empty">Nessun dato salvato per questo giorno.</div>`;
   return html;
 }
-
-function buildSummaryHTML(mode) {
-  const dateStr = new Date().toLocaleString('it-IT');
+$('summaryBtn').onclick = () => {
   let body = '';
-  if (mode === 'all') {
-    Object.keys(WORKOUT_DATA).forEach(day => { body += buildSummaryDaySection(day); });
-  } else {
-    body += buildSummaryDaySection(currentDay);
-  }
-  return `
+  exportDays().forEach(d => { body += buildSummaryDaySection(d); });
+  $('summaryContent').innerHTML = `
     <div class="summary-title">Riepilogo Allenamento</div>
-    <div class="summary-sub">Generato il ${escapeHtml(dateStr)}</div>
+    <div class="summary-sub">Generato il ${escapeHtml(new Date().toLocaleString('it-IT'))}</div>
     ${body}
-    <div class="summary-footer">Scheda allenamento personale</div>
-  `;
-}
-
-function openSummaryView() {
-  document.getElementById('summaryContent').innerHTML = buildSummaryHTML(currentExportMode);
-  document.getElementById('exportModal').classList.remove('open');
-  document.getElementById('summaryView').classList.add('open');
+    <div class="summary-footer">Scheda allenamento personale</div>`;
+  $('exportModal').classList.remove('open');
+  $('summaryView').classList.add('open');
   window.scrollTo(0, 0);
-}
-function closeSummaryView() {
-  document.getElementById('summaryView').classList.remove('open');
-}
-document.getElementById('summaryBtn').addEventListener('click', openSummaryView);
-document.getElementById('summaryCloseBtn').addEventListener('click', closeSummaryView);
+};
+$('summaryCloseBtn').onclick = () => {
+  $('summaryView').classList.remove('open');
+  if (pendingRender) renderAll();
+};
 
-// ---------- IMPOSTAZIONI / BACKUP / RESET ----------
-function openSettingsModal() {
-  const totalEntries = Object.keys(state).length;
-  const exNames = new Set();
-  Object.keys(state).forEach(k => { if (hasData(state[k])) exNames.add(k); });
-  document.getElementById('dataSummary').textContent =
-    totalEntries > 0 ? `Hai ${exNames.size} sessioni di esercizi salvate in totale.` : 'Non hai ancora salvato nessun dato.';
-  document.getElementById('backupStatus').className = 'backup-status';
-  document.getElementById('settingsModal').classList.add('open');
-}
+// ================== IMPOSTAZIONI / BACKUP ==================
+$('openSettingsBtn').onclick = () => {
+  const n = Object.values(logs).filter(hasData).length;
+  $('accountEmail').textContent = currentUser ? 'Connesso come ' + (currentUser.email || currentUser.displayName || 'utente') : '';
+  $('dataSummary').textContent = n ? `Hai ${n} esercizi registrati in totale. La scheda non viene toccata.` : 'Non hai ancora registrato allenamenti.';
+  $('backupStatus').className = 'backup-status';
+  $('settingsModal').classList.add('open');
+};
 
-document.getElementById('backupDownloadBtn').addEventListener('click', async () => {
-  const payload = { app: 'scheda_allenamento', exportedAt: new Date().toISOString(), data: state };
-  const jsonStr = JSON.stringify(payload, null, 2);
-  const dateStr = new Date().toISOString().slice(0, 10);
-  const fileName = `backup_allenamento_${dateStr}.json`;
+document.querySelectorAll('[data-close]').forEach(b => {
+  b.addEventListener('click', () => {
+    $(b.dataset.close).classList.remove('open');
+    if (pendingRender && !$('editorView').classList.contains('open')) renderAll();
+  });
+});
 
-  const downloads = await getDownloadsCapability();
-  if (downloads) {
-    try {
-      const result = await downloads.save({ filename: fileName, data: jsonStr });
-      showToast(result.status === 'saved' ? 'Backup salvato \u2713' : 'Backup inviato \u2713');
-    } catch (e) {
-      if (e && e.code === 'declined') return;
-      showToast('Salvataggio non riuscito, riprova');
-    }
-    return;
-  }
-
-  // Fallback per quando la pagina viene aperta come semplice file HTML (non come artifact)
-  const blob = new Blob([jsonStr], { type: 'application/json' });
+$('backupDownloadBtn').onclick = () => {
+  const payload = { app: 'scheda_allenamento', version: 2, exportedAt: new Date().toISOString(), workout, logs };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = fileName;
+  a.download = 'backup_allenamento_' + new Date().toISOString().slice(0, 10) + '.json';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
   showToast('Backup scaricato \u2713');
-});
+};
 
-document.getElementById('backupRestoreBtn').addEventListener('click', () => {
-  document.getElementById('backupFileInput').click();
-});
-
-document.getElementById('backupFileInput').addEventListener('change', (e) => {
+$('backupRestoreBtn').onclick = () => $('backupFileInput').click();
+$('backupFileInput').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  const statusEl = document.getElementById('backupStatus');
+  const statusEl = $('backupStatus');
   const reader = new FileReader();
   reader.onload = (ev) => {
     try {
       const parsed = JSON.parse(ev.target.result);
-      const dataToMerge = parsed && parsed.data && typeof parsed.data === 'object' ? parsed.data : parsed;
-      if (!dataToMerge || typeof dataToMerge !== 'object') throw new Error('formato non valido');
-      const keys = Object.keys(dataToMerge);
-      if (keys.length === 0) throw new Error('nessun dato trovato nel file');
-      if (!confirm(`Il backup contiene ${keys.length} voci. Verranno unite ai dati attuali (le sessioni con lo stesso nome saranno sovrascritte). Continuare?`)) return;
-      Object.assign(state, dataToMerge);
-      saveState();
-      statusEl.textContent = `Ripristinate ${keys.length} voci con successo.`;
+      if (parsed && parsed.version === 2 && parsed.workout) {
+        const nLogs = parsed.logs ? Object.keys(parsed.logs).length : 0;
+        if (!confirm(`Il backup contiene una scheda con ${parsed.workout.days.length} giorni e ${nLogs} allenamenti. La scheda attuale verrà sostituita e lo storico unito. Continuare?`)) return;
+        workout = normalizeWorkout(parsed.workout);
+        persistWorkout();
+        commitLogWrites(Object.keys(parsed.logs || {}).map(id => ({ id, data: parsed.logs[id] })));
+        statusEl.textContent = `Importati la scheda e ${nLogs} allenamenti.`;
+      } else {
+        // backup della versione precedente (dati salvati per nome esercizio)
+        const legacy = parsed && parsed.data && typeof parsed.data === 'object' ? parsed.data : parsed;
+        if (!legacy || typeof legacy !== 'object' || !Object.keys(legacy).length) throw new Error('nessun dato trovato nel file');
+        if (!workout.days.length) {
+          if (!confirm('Questo è un backup della versione precedente. Per importarlo carico prima la scheda di esempio, su cui era basato. Continuare?')) return;
+          workout = buildExampleWorkout();
+          persistWorkout();
+          currentDayId = workout.days[0].id;
+        }
+        const res = importLegacyEntries(legacy);
+        try { localStorage.setItem(legacyImportedFlag(), '1'); } catch (err) { /* ignora */ }
+        statusEl.textContent = `Importati ${res.imported} allenamenti.` + (res.skipped ? ` ${res.skipped} non corrispondono a esercizi della scheda attuale e sono stati saltati.` : '');
+      }
       statusEl.className = 'backup-status show ok';
+      renderDayTabs();
       renderAll();
     } catch (err) {
       statusEl.textContent = 'File non valido: ' + err.message;
@@ -1522,28 +2184,19 @@ document.getElementById('backupFileInput').addEventListener('change', (e) => {
   e.target.value = '';
 });
 
-document.getElementById('resetBtn').addEventListener('click', () => {
-  if (confirm("Sei sicuro di voler cancellare TUTTI i dati salvati? Questa azione non si puo' annullare. Ti consigliamo di scaricare prima un backup.")) {
-    localStorage.removeItem(STORAGE_KEY);
-    OLD_STORAGE_KEYS.forEach(k => localStorage.removeItem(k));
-    state = {};
-    document.getElementById('settingsModal').classList.remove('open');
-    renderAll();
-    showToast('Dati cancellati');
-  }
-});
+$('resetBtn').onclick = () => {
+  if (!confirm("Cancellare TUTTO lo storico degli allenamenti? La scheda resta. L'azione non si può annullare: scarica prima un backup se vuoi tenerne una copia.")) return;
+  const n = deleteLogs(() => true);
+  $('settingsModal').classList.remove('open');
+  renderAll();
+  showToast(n ? 'Storico cancellato' : 'Non c\u2019era nulla da cancellare');
+};
 
-// ---------- PWA: service worker per uso offline ----------
+// ================== PWA ==================
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => { /* non disponibile (es. dentro l'artifact): ignora */ });
-  });
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 }
 
-// ---------- AVVIO ----------
-document.getElementById('detailBackBtn').addEventListener('click', closeExerciseDetail);
-renderDayTabs();
-renderAll();
 </script>
 </body>
 </html>
